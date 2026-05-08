@@ -1,0 +1,12 @@
+Conversion Warnings Log
+
+
+MSG_ID: 119 	MSG_TYPE: S 	MSG_NAME: FuelcellStrategyInputs
+	SIG_NAME: FCStrategyEnabled, STATUS: Invalid Max or Min value., ACTION: Value Set to default
+	SIG_NAME: FCStartupEnabled, STATUS: Invalid Max or Min value., ACTION: Value Set to default
+
+MSG_ID: 132 	MSG_TYPE: S 	MSG_NAME: FuelcellStrategyOutputs
+	SIG_NAME: FCStrategyFeedback, STATUS: Invalid Max or Min value., ACTION: Value Set to default
+
+MSG_ID: 131 	MSG_TYPE: S 	MSG_NAME: FuelcellControllerOutputs
+	SIG_NAME: TemperatureStack, STATUS: Invalid Max or Min value., ACTION: Value Set to default

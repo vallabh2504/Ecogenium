@@ -1,0 +1,23 @@
+----------------------------------------------------------------------------------------------------------------------------------
+NCDrill File Report For: TelematicsBoardV1.PcbDoc   06.11.2024  18:58:43
+----------------------------------------------------------------------------------------------------------------------------------
+
+Layer Pair : Top Layer to Bottom Layer
+ASCII RoundHoles File : TelematicsBoardV1-RoundHoles.TXT
+ASCII SlotHoles File : TelematicsBoardV1-SlotHoles.TXT
+
+Tool       Hole Size               Hole Tolerance               Hole Type       Hole Count   Plated         Tool Travel
+----------------------------------------------------------------------------------------------------------------------------------
+T1      12mil (0.3mm)                                             Round             13        PTH        4.13inch (104.82mm)
+T2      28mil (0.7mm)                                             Round             28        PTH        1.35inch (34.29mm)
+T3      39mil (1mm)                                               Round             9         PTH        0.80inch (20.32mm)
+T4      43mil (1.1mm)                                             Round             6         PTH        0.56inch (14.16mm)
+T5      90mil (2.286mm)                                           Round             2         PTH        0.80inch (20.32mm)
+T6      126mil (3.2mm)                                            Round             5         PTH        4.58inch (116.34mm)
+T7      128mil (3.25mm)                                           Round             4         PTH        7.45inch (189.35mm)
+T8      35mil (0.9mm)                                             Round             1         NPTH       0.00inch (0.00mm)
+T9      35mil (0.9mm)                                             Slot              1         NPTH       0.03inch (0.80mm)
+----------------------------------------------------------------------------------------------------------------------------------
+Totals                                                                              69
+
+Total Processing Time (hh:mm:ss) : 00:00:00

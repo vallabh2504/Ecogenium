@@ -1,0 +1,38 @@
+services:
+  grafana:
+    image: grafana/grafana-enterprise:11.2.1
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+     - GF_SERVER_ROOT_URL=http://my.grafana.server/
+     - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=1ms
+     - GF_DATE_FORMATS_FULL_DATE=YYYY-MM-DD HH:mm:ss:SSS
+     - GF_DATE_FORMATS_INTERVAL_SECOND=HH:mm:ss:SSS
+     - GF_SERVER_HTTP_PORT=3000
+    ports:
+     - '3000:3000'
+    volumes:
+     - 'grafana_storage:/var/lib/grafana'
+  db:
+    container_name: db
+    image: mysql:9.0.1 #5.7
+    restart: always
+    environment:
+      MYSQL_DATABASE: 'db'
+      # So you don't have to use root, but you can if you like
+      MYSQL_USER: 'user'
+      # You can use whatever password you like
+      MYSQL_PASSWORD: 'ecogenium4thewin'
+      # Password for root access
+      MYSQL_ROOT_PASSWORD: 'ecogenium4thewin'
+    ports:
+      # <Port exposed> : <MySQL Port running inside container>
+      - '3306:3306'
+    expose:
+      # Opens port 3306 on the container
+      - '3306'
+    volumes:
+      - my-db:/var/lib/mysql
+volumes:
+  grafana_storage: {}
+  my-db:
