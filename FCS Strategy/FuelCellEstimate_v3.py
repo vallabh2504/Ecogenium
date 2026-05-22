@@ -144,12 +144,18 @@ BLOWER_Q_WP      = 372.0 / 60_000.0    # 372 lpm → m³/s
 BLOWER_DP_WP     = 8_850.0              # Pa
 BLOWER_P_WP      = 105.12              # W  (= 24 V × 4.38 A)
 BLOWER_ETA_WP    = (BLOWER_Q_WP * BLOWER_DP_WP) / BLOWER_P_WP  # ≈ 0.522 (52.2 %)
+                                                                  # validation only — not used in model
 
-# Off-design efficiency for our low-flow operating region (18–20 % of Q_wp)
-# Centrifugal fans lose efficiency away from design point; conservative 30 % used
+# Off-design efficiency for our low-flow operating region (18–20 % of Q_wp).
+# Note: C65B2 is a regenerative (ring) blower — centrifugal affinity laws are
+# approximate here. η=30% is conservative (vs η_WP=52.2%) and accounts for
+# operation well left of the design point. Validate against Boreasa partial-
+# speed curves if available.
 BLOWER_ETA_EFF   = 0.30
 
-# Minimum idle power of PWM driver + motor at low speed  [W]
+# Minimum idle power of PWM driver + motor at low speed  [W].
+# This floor is active for all I < ~20 A (54 % of rated), meaning P_BOP is
+# essentially constant at 11.2 W below half-load — a real regime boundary.
 BLOWER_P_IDLE    = 3.0
 
 # Cathode system-resistance constant, calibrated: ΔP = dP_cat_nom at Q_air(I_nom)
