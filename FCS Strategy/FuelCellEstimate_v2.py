@@ -118,7 +118,7 @@ LHV_H2   = 241_820.0     # Lower heating value H₂         [J/mol]
 V_mol_stp = 22.414       # Molar volume at STP (0°C,1atm) [L/mol]
 rho_air  = 1.20          # Air density at ~20 °C, 1 atm   [kg/m³]
 c_p_H2O  = 4182.0        # Specific heat of water         [J/kg/K]
-rho_H2O  = 975.0         # Water density at ~70 °C        [kg/m³]
+rho_H2O  = 980.5         # Water density at ~65 °C        [kg/m³]
 n_e      = 2             # Electrons per H₂ molecule
 
 # ─── STACK PARAMETERS (balticFuelCells FC Stack LC 52.30) [Ref 7] ─────────────
@@ -133,7 +133,8 @@ P_nom_spec = 1040.0      # Nameplate gross power          [W]  [Ref 7]
 # ─── POLARIZATION MODEL PARAMETERS (calibrated to LC 52.30) [Ref 1,6,7] ─────
 E0       = 0.955         # Practical OCV per cell         [V]
 b        = 0.058         # Tafel slope = R·T/(α·F)        [V]  (α=0.498 @ 65°C)
-J0       = 0.010         # Exchange current density       [A/cm²]
+J0       = 0.010         # Apparent exchange current density [A/cm²] — empirical fit parameter,
+                         # not the intrinsic ORR value; absorbs reference-potential offset [Ref 1]
 ASR      = 0.095         # Area-specific resistance       [Ω·cm²]
 J_L      = 1.65          # Limiting current density       [A/cm²]
 
@@ -224,7 +225,7 @@ def P_pump(I: np.ndarray) -> np.ndarray:
     p_g     = P_stack_gross(I)
     # Gross stack efficiency (LHV): V_cell / V_th,LHV
     eta_g   = np.clip(cell_voltage(I) / (LHV_H2 / (n_e * F)), 0.0, 1.0)
-    Q_th    = np.maximum(p_g * (1.0 - eta_g), 0.0)              # W, waste heat
+    Q_th    = np.maximum(p_g * (1.0 / eta_g - 1.0), 0.0)  # = N·I·(V_th − V_cell)              # W, waste heat
     m_dot_c = np.where(Q_th > 0,
                        Q_th / (c_p_H2O * dT_coolant), 0.0)      # kg/s
     return m_dot_c * dP_coolant / (rho_H2O * eta_pump)           # W
@@ -255,7 +256,11 @@ def eta_system_net(I: np.ndarray) -> np.ndarray:
     """
     Net system efficiency on LHV basis [Ref 2,3].
     η_sys = P_net / (ṅ_H2,consumed · ΔH_LHV)
-    Uses consumed H₂ (dead-end anode utilisation ≈ 99 %).
+
+    Convention: denominator uses electrochemically *consumed* H₂ (λ=1 basis).
+    This is correct for dead-end anode operation (utilisation ≈ 99%).
+    lam_H2=1.4 governs the *supply* flow rate reported separately; it does NOT
+    reduce efficiency here because the purged excess is negligible (<1%). [Ref 7]
     """
     P_chem = H2_molar_consumed(I) * LHV_H2                      # W (chem power consumed)
     return np.where(P_chem > 0,
