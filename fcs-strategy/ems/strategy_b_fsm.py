@@ -1,125 +1,192 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ems_core import (
-    simulate_race, FC_P_MIN, FC_P_MAX,
-    SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
-    N_LAPS, DT, RESULTS_DIR,
-    fc_current, K_H2,
+    build_demand_profile, fc_current, fc_h2_rate,
+    sc_soc_update, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
+    FC_P_MAX, FC_RAMP, K_H2,
+    N_LAPS, DT, RESULTS_DIR
 )
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# ── SOC thresholds (with hysteresis) ──────────────────────────────────────────
-SOC_H_HI = 0.85
-SOC_HI   = 0.75
+
+# ── Local simulator: allows P_fc = 0 (FC fully off during glide) ──────────────
+def simulate_race_fsm(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
+    """
+    Race simulator identical to ems_core.simulate_race() EXCEPT:
+      - P_fc is clamped to [0, FC_P_MAX] (FC can be fully shut down)
+      - When P_fc_cmd == 0: I_fc = 0, H2 flow = 0 (truly off)
+      - SC floor protection still forces FC on if SC would drop below SC_SOC_MIN
+    """
+    t_lap, P_lap = build_demand_profile()
+    N_pts = len(t_lap)
+    T_lap = float(t_lap[-1])
+    t_all = np.concatenate([t_lap + i * T_lap for i in range(N_LAPS)])
+    P_dem = np.tile(P_lap, N_LAPS)
+    n = N_LAPS * N_pts
+
+    P_fc_ar  = np.empty(n)
+    P_sc_ar  = np.empty(n)
+    SOC_ar   = np.empty(n + 1)
+    I_fc_ar  = np.empty(n)
+    m_H2_ar  = np.empty(n)
+    lap_SOC  = np.empty(N_LAPS + 1)
+
+    SOC_ar[0]  = SOC_0
+    lap_SOC[0] = SOC_0
+    P_fc_prev  = 0.0   # FC starts off
+
+    for k in range(n):
+        lap_idx  = k // N_pts
+        t_in_lap = float(t_all[k] - lap_idx * T_lap)
+        soc_k    = SOC_ar[k]
+        Pd       = float(P_dem[k])
+
+        P_fc_cmd = float(strategy_fn(Pd, soc_k, P_fc_prev, t_in_lap, lap_idx))
+
+        # Ramp rate: up is limited, instantaneous off is allowed
+        if P_fc_cmd > P_fc_prev:
+            P_fc_cmd = min(P_fc_cmd, P_fc_prev + FC_RAMP * DT)
+        P_fc_cmd = float(np.clip(P_fc_cmd, 0.0, FC_P_MAX))
+
+        P_sc_k = Pd - P_fc_cmd
+
+        # SC floor protection: if SC would deplete, force FC to cover demand
+        trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
+        if P_sc_k > 0 and trial_soc <= SC_SOC_MIN:
+            P_fc_cmd  = min(FC_P_MAX, Pd)
+            P_sc_k    = max(0.0, Pd - P_fc_cmd)
+            trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
+
+        P_fc_ar[k]    = P_fc_cmd
+        P_sc_ar[k]    = P_sc_k
+        SOC_ar[k + 1] = trial_soc
+        I_fc_ar[k]    = float(fc_current(max(P_fc_cmd, 1e-6)) if P_fc_cmd > 0 else 0.0)
+        m_H2_ar[k]    = fc_h2_rate(I_fc_ar[k]) * DT
+        P_fc_prev      = P_fc_cmd
+
+        if (k + 1) % N_pts == 0:
+            lap = (k + 1) // N_pts
+            lap_SOC[lap] = SOC_ar[k + 1]
+            if verbose:
+                lap_h2 = float(np.sum(m_H2_ar[k + 1 - N_pts: k + 1]))
+                print(f"  Lap {lap:2d}  SOC={lap_SOC[lap]:.3f}  H2={lap_h2:.3f} g")
+
+    return {
+        't':          t_all,
+        'P_dem':      P_dem,
+        'P_fc':       P_fc_ar,
+        'P_sc':       P_sc_ar,
+        'SOC':        SOC_ar[:-1],
+        'I_fc':       I_fc_ar,
+        'm_H2_total': float(np.sum(m_H2_ar)),
+        'delta_SOC':  float(SOC_ar[n] - SOC_0),
+        'SOC_final':  float(SOC_ar[n]),
+        'lap_SOC':    lap_SOC,
+        'N_pts_lap':  N_pts,
+        'T_lap':      T_lap,
+    }
+
+
+# ── SOC & power thresholds ────────────────────────────────────────────────────
 SOC_REF  = 0.60
-SOC_LO   = 0.45
-SOC_L_LO = 0.20
+SOC_HI   = 0.75
+SOC_LO   = 0.40
+SOC_CRIT = 0.20
 
-# ── Power thresholds ──────────────────────────────────────────────────────────
-P_LO   = 150.0
-P_MED  = 500.0
-P_HI   = 900.0
-P_PEAK = 1013.0
-
-# Minimum timesteps in a state before a transition is permitted (10 × 0.2 s = 2 s)
-MIN_DWELL = 10
+P_GLIDE  = 50.0    # demand below this → enter GLIDE (motor effectively off)
+P_MID    = 400.0   # demand above this → CRUISE can't keep up
+P_HI_TH  = 700.0   # demand above this → need HIGH
 
 
-def next_state(prev_state, P_dem, SOC, dwell_count):
-    if prev_state == 0:       # IDLE
-        if SOC < SOC_L_LO:
-            return 3
-        if SOC < SOC_LO or P_dem > P_MED:
-            return 1
-        if P_dem < P_LO and SOC < SOC_HI:
-            return 0
-        if SOC > SOC_H_HI:
-            return 0
+# ── FSM transition logic ──────────────────────────────────────────────────────
+# States:
+#   S0 = GLIDE  : P_fc = 0 W
+#   S1 = CRUISE : P_fc = P_CRUISE W
+#   S2 = HIGH   : P_fc = 700 W
+#   S3 = MAX    : P_fc = 1013 W
+
+def next_state(prev_state, P_dem, SOC):
+    # Emergency: SC critically low → MAX regardless
+    if SOC < SOC_CRIT:
+        return 3
+
+    if prev_state == 0:  # GLIDE
+        if P_dem > P_GLIDE:      return 1   # demand returning → CRUISE
+        if SOC < SOC_LO:         return 1   # SC draining during glide → CRUISE to recharge
+        return 0
+
+    elif prev_state == 1:  # CRUISE
+        if P_dem < P_GLIDE and SOC >= SOC_REF - 0.05:  return 0  # glide again
+        if P_dem > P_HI_TH:                             return 2  # very high demand
+        if SOC < SOC_CRIT:                              return 3  # emergency
         return 1
 
-    elif prev_state == 1:     # CRUISE
-        if SOC < SOC_L_LO or P_dem > P_PEAK:
-            return 3
-        if SOC < SOC_LO or P_dem > P_HI:
-            return 2
-        if P_dem < P_LO and SOC > SOC_REF - 0.05:
-            return 0
-        if SOC > SOC_H_HI and P_dem < P_LO:
-            return 0
-        return 1
-
-    elif prev_state == 2:     # HIGH
-        if SOC < SOC_L_LO or P_dem > P_PEAK:
-            return 3
-        if SOC > SOC_HI and P_dem < P_MED:
-            return 1
-        if P_dem < P_LO and SOC > SOC_HI:
-            return 0
+    elif prev_state == 2:  # HIGH
+        if P_dem < P_MID and SOC > SOC_LO + 0.05:  return 1
+        if P_dem < P_GLIDE:                         return 0
         return 2
 
-    else:                     # MAX
-        if SOC > SOC_LO + 0.05 and P_dem < P_HI:
-            return 2
-        if SOC > SOC_HI and P_dem < P_MED:
-            return 1
+    else:  # MAX (state 3)
+        if P_dem < P_HI_TH and SOC > SOC_LO + 0.10:  return 2
+        if P_dem < P_MID   and SOC > SOC_HI:          return 1
         return 3
 
 
-def make_strategy(P_fc_S0):
-    STATE_POWER = [P_fc_S0, 700.0, 900.0, 1013.0]
-    state = [1]   # start in CRUISE
-    dwell = [0]
+# ── Strategy factory ──────────────────────────────────────────────────────────
+def make_strategy(P_CRUISE):
+    STATE_POWER = [0.0, P_CRUISE, 700.0, 1013.0]
+    state     = [1]   # start in CRUISE
+    dwell     = [0]
     state_log = []
 
     def strategy_fn(P_dem, SOC, P_fc_prev, t_in_lap, lap_idx):
         dwell[0] += 1
-        if dwell[0] >= MIN_DWELL:
-            new_state = next_state(state[0], P_dem, SOC, dwell[0])
-            if new_state != state[0]:
-                state[0] = new_state
+        if dwell[0] >= 5:  # minimum 5 steps (1 s) dwell before transition
+            new_s = next_state(state[0], P_dem, SOC)
+            if new_s != state[0]:
+                state[0] = new_s
                 dwell[0] = 0
         state_log.append(state[0])
         return STATE_POWER[state[0]]
 
-    # Expose log for post-run analysis
     strategy_fn.state_log = state_log
     return strategy_fn
 
 
-# ── Charge-sustenance tuning (bisection on P_fc_S0) ──────────────────────────
-print("Tuning P_fc_S0 for charge sustenance …")
+# ── Charge-sustenance tuning via bisection on P_CRUISE ───────────────────────
+print("Tuning P_CRUISE for charge sustenance ...")
 TOLERANCE = 0.01
-P_fc_S0 = 100.0
-lo, hi   = 50.0, 300.0
+P_CRUISE  = 350.0
+lo, hi    = 150.0, 700.0
 best_result   = None
 best_strategy = None
 
 for iteration in range(25):
-    strat = make_strategy(P_fc_S0)
-    result = simulate_race(strat, SOC_0=SC_SOC_0, verbose=False)
+    strat  = make_strategy(P_CRUISE)
+    result = simulate_race_fsm(strat, SOC_0=SC_SOC_0, verbose=False)
     delta_soc = result['delta_SOC']
-    print(f"  Iter {iteration+1:2d}  P_fc_S0={P_fc_S0:.1f} W  ΔSOC={delta_soc:+.4f}  H2={result['m_H2_total']:.3f} g")
+    print(f"  Iter {iteration+1:2d}  P_CRUISE={P_CRUISE:.1f} W  ΔSOC={delta_soc:+.4f}  H2={result['m_H2_total']:.3f} g")
 
     if abs(delta_soc) <= TOLERANCE:
         best_result   = result
         best_strategy = strat
         break
 
-    # Bisection: net discharge → raise idle power; net charge → lower it
     if delta_soc < -TOLERANCE:
-        lo = P_fc_S0
+        lo = P_CRUISE   # net discharge → raise cruise power
     else:
-        hi = P_fc_S0
-    P_fc_S0 = (lo + hi) / 2
+        hi = P_CRUISE   # net charge → lower cruise power
+    P_CRUISE = (lo + hi) / 2
     best_result   = result
     best_strategy = strat
 
 if best_result is None:
     best_result   = result
     best_strategy = strat
+
 
 # ── Derived metrics ───────────────────────────────────────────────────────────
 delta_soc  = best_result['delta_SOC']
@@ -144,16 +211,17 @@ pct_s1 = 100.0 * np.sum(state_log == 1) / n_total
 pct_s2 = 100.0 * np.sum(state_log == 2) / n_total
 pct_s3 = 100.0 * np.sum(state_log == 3) / n_total
 
+
 # ── Figure ────────────────────────────────────────────────────────────────────
 fig, axes = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
 fig.suptitle(
-    f"Strategy B — Rule-Based FSM | ΔSOC={delta_soc:+.4f} | H2={m_H2:.3f} g | P_idle={P_fc_S0:.1f} W",
+    f"Strategy B (v2) — FSM FC-off Glide | ΔSOC={delta_soc:+.4f} | H2={m_H2:.3f} g | P_cruise={P_CRUISE:.1f} W",
     fontsize=12
 )
 
 # Panel 1: Power flows
 ax1 = axes[0]
-for lvl in [P_fc_S0, 700, 900, 1013]:
+for lvl in [0, P_CRUISE, 700, 1013]:
     ax1.axhline(lvl, color='lightgrey', linewidth=0.8, linestyle='--')
 ax1.plot(t_min, P_dem_arr, color='black',  linewidth=0.7, label='P_dem')
 ax1.plot(t_min, P_fc_arr,  color='blue',   linewidth=0.8, label='P_fc')
@@ -165,9 +233,9 @@ ax1.set_title('Power Flows')
 # Panel 2: SOC
 ax2 = axes[1]
 ax2.plot(t_min, SOC_arr, color='green', linewidth=0.8)
-ax2.axhline(0.60, color='blue',  linestyle='--', linewidth=0.8, label='SOC_ref 0.60')
-ax2.axhline(0.15, color='red',   linestyle='--', linewidth=0.8, label='floor 0.15')
-ax2.axhline(0.95, color='purple',linestyle='--', linewidth=0.8, label='ceiling 0.95')
+ax2.axhline(SC_SOC_0,   color='blue',   linestyle='--', linewidth=0.8, label=f'SOC_ref {SC_SOC_0:.2f}')
+ax2.axhline(SC_SOC_MIN, color='red',    linestyle='--', linewidth=0.8, label=f'floor {SC_SOC_MIN:.2f}')
+ax2.axhline(SC_SOC_MAX, color='purple', linestyle='--', linewidth=0.8, label=f'ceiling {SC_SOC_MAX:.2f}')
 ax2.set_ylabel('SC SOC')
 ax2.set_ylim(0, 1)
 ax2.legend(loc='upper right', fontsize=8)
@@ -192,16 +260,17 @@ plt.savefig(out_path, dpi=150)
 plt.close()
 print(f"\nFigure saved → {out_path}")
 
+
 # ── Final print block ─────────────────────────────────────────────────────────
 print()
-print("=== Strategy B: Rule-Based FSM ===")
-print(f"  Tuned P_fc_IDLE   : {P_fc_S0:.1f} W")
-print(f"  Final ΔSOC        : {delta_soc:+.4f}  (target |ΔSOC| < 0.01)")
-print(f"  Total H2 consumed : {m_H2:.3f} g")
-print(f"  Charge sustained  : {'YES' if abs(delta_soc) <= 0.01 else 'NO'}")
-print(f"  Convergence iters : {iteration+1}")
-print(f"  Min lap SOC       : {min(lap_SOC):.3f}")
-print(f"  Max lap SOC       : {max(lap_SOC):.3f}")
-print(f"  Mean P_fc         : {mean_pfc:.1f} W")
-print(f"  State distribution: S0={pct_s0:.1f}% S1={pct_s1:.1f}% S2={pct_s2:.1f}% S3={pct_s3:.1f}%")
-print("==================================")
+print("=== Strategy B (v2): Rule-Based FSM — FC-off Glide ===")
+print(f"  Tuned P_CRUISE     : {P_CRUISE:.1f} W")
+print(f"  Final ΔSOC         : {delta_soc:+.4f}  (target |ΔSOC| < 0.01)")
+print(f"  Total H2 consumed  : {m_H2:.3f} g")
+print(f"  Charge sustained   : {'YES' if abs(delta_soc) <= 0.01 else 'NO'}")
+print(f"  Convergence iters  : {iteration+1}")
+print(f"  Min lap SOC        : {min(lap_SOC):.3f}")
+print(f"  Max lap SOC        : {max(lap_SOC):.3f}")
+print(f"  Mean P_fc          : {mean_pfc:.1f} W")
+print(f"  State distribution : S0(GLIDE)={pct_s0:.1f}%  S1(CRUISE)={pct_s1:.1f}%  S2(HIGH)={pct_s2:.1f}%  S3(MAX)={pct_s3:.1f}%")
+print("====================================================")

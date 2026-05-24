@@ -1,0 +1,3 @@
+Change Component DesignItemId : Designator=Calypso Old DesignItemId=CMP-002-000002-2 New DesignItemId=CMP-002-000002-3
+Change Component Footprint: Designator=Calypso Old Footprint=Calypso-Footprint-1 New Footprint=Calypso-Footprint-1
+Change Managed Component Library Link : Designator=Calypso Old VaultGUID=c3f8a947-6515-4cb3-9c3c-af320936b97a New VaultGUID=c3f8a947-6515-4cb3-9c3c-af320936b97a Old ItemGUID=58e54268-0511-4510-8c51-76ab64064999 New ItemGUID=58e54268-0511-4510-8c51-76ab64064999 Old RevisionGUID=048fc0ec-81a4-4861-ba91-3d2153e09280 New RevisionGUID=dd68be54-3286-467f-9894-2558e782de21

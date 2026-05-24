@@ -1,0 +1,25 @@
+# npm / Node cache
+.cache/
+node_modules/
+.next/
+dist/
+coverage/
+.vercel/
+.supabase/
+
+# Python
+*.pyc
+__pycache__/
+
+# Env secrets
+.env
+.env.*
+!.env.example
+
+# Altium / PCB tool artefacts
+*.APR_LIB
+History/
+
+# OS
+.DS_Store
+Thumbs.db

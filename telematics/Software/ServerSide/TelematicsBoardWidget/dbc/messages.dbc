@@ -1,0 +1,274 @@
+VERSION ""
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: NEO987 LTEInterface H2Sensor LeftMotorController RightMotorController DCDC PowerDistribution FuelCellController SteeringWheel Acessory MainController
+
+
+BO_ 3221225472 VECTOR__INDEPENDENT_SIG_MSG: 0 Vector__XXX
+ SG_ New_Signal_135 : 0|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ New_Signal_134 : 0|8@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 122 GPSPosition: 8 Vector__XXX
+ SG_ GPSLongitude : 39|32@0- (1,0) [-2147483648|2147483647] "" Vector__XXX
+ SG_ GPSLatitude : 7|32@0- (1,0) [-2147483648|2147483647] "" Vector__XXX
+
+BO_ 123 StrategyOutputs2: 8 Vector__XXX
+ SG_ StrategyRemainingTime : 23|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ StrategyElapsedTime : 7|16@0+ (1,0) [0|65535] "" Vector__XXX
+
+BO_ 119 FuelcellStrategyInputs: 8 Vector__XXX
+ SG_ FCStrategyEnabled : 6|1@0+ (1,0) [0|0] "" Vector__XXX
+ SG_ FCStartupEnabled : 7|1@0- (1,0) [0|0] "" Vector__XXX
+
+BO_ 1570 IVTSensorFCVoltage1: 6 Vector__XXX
+ SG_ IVTFCVoltage : 23|32@0- (1,0) [-2147483648|2147483647] "mV" Vector__XXX
+
+BO_ 1574 IVTSensorFCPower: 6 Vector__XXX
+ SG_ IVTFCPower : 23|32@0- (1,0) [-2147483648|2147483647] "W" Vector__XXX
+
+BO_ 1569 IVTSensorFCCurrent: 6 Vector__XXX
+ SG_ IVTFCCurrent : 23|32@0- (1,0) [-2147483648|2147483647] "mA" Vector__XXX
+
+BO_ 133 DigitalStackTemp: 8 Vector__XXX
+ SG_ TemperatureStackDigital : 7|16@0+ (1,0) [0|65535] "degC" Vector__XXX
+
+BO_ 132 FuelcellStrategyOutputs: 7 Vector__XXX
+ SG_ FCStrategyMode : 8|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ FCStrategyFeedback : 6|1@0- (1,0) [0|0] "" Vector__XXX
+ SG_ FCStartupFeedback : 7|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ H2MassflowTotal : 31|32@0- (1,0) [-3.4E+038|3.4E+038] "" Vector__XXX
+ SG_ FanSet : 23|8@0+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 1318 IVTSensorAccessoryPower: 6 Vector__XXX
+ SG_ IVTAccessoryPower : 23|32@0- (1,0) [-2147483648|2147483647] "W" Vector__XXX
+
+BO_ 1314 IVTSensorAccessoryVoltage1: 6 Vector__XXX
+ SG_ IVTAccessoryVoltage : 23|32@0- (1,0) [-2147483648|2147483647] "mV" Vector__XXX
+
+BO_ 1313 IVTSensorAccessoryCurrent: 6 Vector__XXX
+ SG_ IVTAccessoryCurrent : 23|32@0- (1,0) [-2147483648|2147483647] "mA" Vector__XXX
+
+BO_ 833 PurgeHydrogenSensor2: 8 NEO987
+ SG_ Purge_Heating : 28|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Purge_HydrogenPresent : 27|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 832 PurgeHydrogenSensor: 8 NEO987
+ SG_ Purge_Temperature : 55|8@0+ (1,-60) [-60|195] "degC" Vector__XXX
+ SG_ Purge_Pressure : 39|16@0+ (1,0) [0|65535] "mbar" Vector__XXX
+ SG_ Purge_WaterConcentration : 23|16@0+ (0.01,-0.2) [-0.2|655.15] "vol.-%" Vector__XXX
+ SG_ Purge_HydrogenConcentration : 7|16@0+ (1,0) [0|65535] "vol.-%" Vector__XXX
+
+BO_ 171 MotorControllerROutput: 8 Vector__XXX
+ SG_ MotorRCurrent : 55|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+ SG_ MotorRVoltage : 39|16@0+ (1,0) [0|65535] "10mV" Vector__XXX
+ SG_ SpeedR : 23|16@0- (1,0) [-32768|32767] "0.01 kmh" Vector__XXX
+ SG_ MotorRRPM : 7|16@0- (1,0) [-32768|32767] "" Vector__XXX
+
+BO_ 161 MotorControllerLOutput: 8 Vector__XXX
+ SG_ MotorLCurrent : 55|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+ SG_ MotorLVoltage : 39|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ SpeedL : 23|16@0- (1,0) [-32768|32767] "0.01 kmh" Vector__XXX
+ SG_ MotorLRPM : 7|16@0- (1,0) [-32768|32767] "" Vector__XXX
+
+BO_ 113 StrategyOutputs1: 5 Vector__XXX
+ SG_ StrategyMotorEnabled : 5|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ StrategyDcdcEnable : 6|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ DCDCPowerCalc : 15|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ MotorPowerCalc : 31|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ StrategyEnabled : 7|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 118 MotorControllerOutputs: 8 Vector__XXX
+ SG_ Speed : 23|16@0- (1,0) [-32768|32767] "0.01 kmh" Vector__XXX
+ SG_ MotorVoltage : 39|16@0- (1,0) [-32768|32767] "10mV" Vector__XXX
+ SG_ MotorRPM : 7|16@0- (1,0) [-32768|32767] "rpm" Vector__XXX
+ SG_ MotorCurrent : 55|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+
+BO_ 152 DCDCInputs: 5 Vector__XXX
+ SG_ SetVoltage : 15|16@0- (1,0) [-32768|32767] "10mV" Vector__XXX
+ SG_ SetCurrent : 31|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+ SG_ DCDCEnable : 0|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 151 DCDCOutputs: 2 Vector__XXX
+ SG_ TemperatureFront : 15|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ TemperatureBack : 7|8@0+ (1,0) [0|255] "degC" Vector__XXX
+
+BO_ 143 PowerDistributionInputs: 5 Vector__XXX
+ SG_ FCControllerEnable : 24|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ SupercapsEnable : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ DcdcInputEnable : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Relay : 0|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 117 MotorControllerInputs: 5 Vector__XXX
+ SG_ BackwardCurrent : 31|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+ SG_ ForwardCurrent : 15|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+ SG_ OverwriteEnabled : 0|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 142 PowerDistributionOutputs2: 8 Vector__XXX
+ SG_ DCDCVoltage : 7|16@0- (1,0) [-32768|32767] "10mV" Vector__XXX
+ SG_ VescCurrent : 55|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+ SG_ VescVoltage : 39|16@0- (1,0) [-32768|32767] "10mV" Vector__XXX
+ SG_ DCDCCurrent : 23|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+
+BO_ 141 PowerDistributionOutputs1: 8 Vector__XXX
+ SG_ SupercapVoltage : 7|16@0+ (1,0) [0|65535] "10mV" Vector__XXX
+ SG_ FuelcellCurrent : 55|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+ SG_ FuelcellVoltage : 39|16@0- (1,0) [-32768|32767] "10mV" Vector__XXX
+ SG_ SupercapCurrent : 23|16@0- (1,0) [-32768|32767] "10mA" Vector__XXX
+
+BO_ 131 FuelcellControllerOutputs: 8 FuelCellController
+ SG_ Shorting : 4|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ FCPowerFault : 5|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ PurgeValveOpen : 7|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ TemperatureStack : 15|16@0+ (1,0) [-32768|32767] "degC" Vector__XXX
+ SG_ TemperatureAmbient : 31|16@0+ (1,0) [0|65535] "degC" Vector__XXX
+ SG_ MassflowConnected : 6|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ H2Massflow : 47|16@0+ (1,0) [0|65535] "mg/min" Vector__XXX
+
+BO_ 116 MoterControllerControlling: 8 MainController
+ SG_ RightForwardCurrent : 7|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+ SG_ RightBackwardCurrent : 39|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+ SG_ LeftForwardCurrent : 23|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+ SG_ LeftBackwardCurrent : 55|16@0+ (1,0) [0|65535] "10mA" Vector__XXX
+
+BO_ 2147483838 Heartbeat_LTEInterface: 7 LTEInterface
+
+BO_ 2147483798 Heartbeat_DCDC: 8 DCDC
+ SG_ BusInterfaceVoltage_DC : 31|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ BusInterfaceTemperature_DC : 63|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ BusInterfacePower_DC : 47|16@0+ (1,0) [0|65535] "mW" Vector__XXX
+ SG_ EmergencyReset_DC : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Emergency_DC : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Counter_DC : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 2147483788 Heartbeat_PowerDistribution: 8 PowerDistribution
+ SG_ Counter_PD : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ BusInterfaceVoltage_PD : 31|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ BusInterfaceTemperature_PD : 63|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ BusInterfacePower_PD : 47|16@0+ (1,0) [0|65535] "mW" Vector__XXX
+ SG_ Emergency_PD : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ EmergencyReset_PD : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 2147483778 Heartbeat_FuelCellController: 8 FuelCellController
+ SG_ Counter_FC : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ BusInterfaceVoltage_FC : 31|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ BusInterfaceTemperature_FC : 63|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ BusInterfacePower_FC : 47|16@0+ (1,0) [0|65535] "mW" Vector__XXX
+ SG_ Emergency_FC : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ EmergencyReset_FC : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 2147483768 Heartbeat_Accessory: 8 Acessory
+ SG_ BusInterfaceVoltage_A : 31|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ BusInterfaceTemperature_A : 63|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ BusInterfacePower_A : 47|16@0+ (1,0) [0|65535] "mW" Vector__XXX
+ SG_ EmergencyReset_A : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Emergency_A : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Counter_A : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 2147483748 Heartbeat_SteeringWheel: 8 SteeringWheel
+ SG_ Counter_SW : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ BusInterfaceVoltage_SW : 31|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ BusInterfaceTemperature_SW : 63|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ BusInterfacePower_SW : 47|16@0+ (1,0) [0|65535] "mW" Vector__XXX
+ SG_ Emergency_SW : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ EmergencyReset_SW : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 101 SteeringWheelOutputs: 8 SteeringWheel
+ SG_ Accelerator : 23|8@0+ (1,0) [0|100] "%" Vector__XXX
+ SG_ RightIndicatorButton : 3|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ LeftIndicatorButton : 2|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ WiperButton : 0|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ HornButton : 1|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ SteeringWheelButton5 : 15|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ SteeringWheelButton4 : 4|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ SteeringWheelButton3 : 5|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ SteeringWheelButton2 : 6|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ SteeringWheelButton1 : 7|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 121 AcessoryOutputs: 7 Acessory
+ SG_ Horn : 48|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Wiper : 40|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ BreakPressed : 32|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ AcessoryButton2 : 24|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ AcessoryButton1 : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ IgnitionButton : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ EmergencyButton_A : 0|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 115 FuelcellControllerInputs: 7 MainController
+ SG_ FCPowerResetFault : 2|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ ShortCircuitInterval : 47|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ FCPowerCapsEnable : 4|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ ShortCircuitingEnable : 3|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ FCPowerFuelCellEnable : 5|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ PurgeInterval : 15|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ PurgeDuration : 31|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ SupplyValve : 7|1@0+ (1,0) [0|1] ""  FuelCellController
+ SG_ PurgeEnable : 6|1@0+ (1,0) [0|1] ""  FuelCellController
+
+BO_ 114 HydrogenSensorCalc: 2 MainController
+ SG_ HydrogenConcentration : 7|16@0+ (1,0) [0|40000] "ppm" Vector__XXX
+
+BO_ 112 AtavaIntelligenceOutputs: 8 MainController
+ SG_ SupercapEstimatedOCV : 31|16@0+ (1,0) [0|65535] "" Vector__XXX
+ SG_ StartupIndicator : 23|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ Mode : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+ SG_ StrategyMode : 15|8@0+ (1,0) [0|255] "" Vector__XXX
+
+BO_ 2147483759 MainControllerOutputs: 8 MainController
+ SG_ OnboardSwitch2 : 20|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ OnboardSwitch1 : 21|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ OnboardButton2 : 22|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ OnboardButton1 : 23|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ ExternalInput2 : 32|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ ExternalInput1 : 24|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ EmergencyResetButton : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ EmergencyButton_MC : 0|1@0+ (1,0) [0|1] "" Vector__XXX
+
+BO_ 2147483758 Heartbeat_MainController: 8 MainController
+ SG_ EmergencyReset_MC : 16|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ Emergency_MC : 8|1@0+ (1,0) [0|1] "" Vector__XXX
+ SG_ BusInterfaceVoltage_MC : 31|16@0+ (1,0) [0|65535] "mV" Vector__XXX
+ SG_ BusInterfaceTemperature_MC : 63|8@0+ (1,0) [0|255] "degC" Vector__XXX
+ SG_ BusInterfacePower_MC : 47|16@0+ (1,0) [0|65535] "mW" Vector__XXX
+ SG_ Counter_MC : 7|8@0+ (1,0) [0|255] "" Vector__XXX
+
+
+
+CM_ BO_ 3221225472 "This is a message for not used signals, created by Vector CANdb++ DBC OLE DB Provider.";
+BA_DEF_  "MultiplexExtEnabled" ENUM  "No","Yes";
+BA_DEF_  "BusType" STRING ;
+BA_DEF_DEF_  "MultiplexExtEnabled" "No";
+BA_DEF_DEF_  "BusType" "CAN";
+SIG_VALTYPE_ 132 H2MassflowTotal : 1;
+
