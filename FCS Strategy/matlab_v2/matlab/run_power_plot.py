@@ -7,6 +7,11 @@ Processing chain:
   3. GPS speed calibration: scale × 0.906354 so 11 laps = exactly 14.5 km
      (Silesia Ring Shell Eco-marathon official course: 1,283 m/lap × 11 = 14.11 km;
       user target 14.5 km → scale = 14.5 / (unscaled smoothed 11-lap distance 15.998 km) = 0.906)
+
+Motor: BAFANG RM G060.1000 6T 90A 48V (serial 12403050001, test date 2024-03-05)
+  Peak output: 1213.38 W at T=31.4 N·m, 369 r/min, V=48.31 V, I=30.10 A
+  Peak efficiency: 83.4 % (coincides with peak-power point)
+  Efficiency varies 22 % (no-load) → 83.4 % (rated) — embedded as 61-point lookup
 """
 
 import numpy as np
@@ -24,9 +29,42 @@ frontal_area            = 0.8     # m²
 rolling_resistance_coef = 0.006
 air_density             = 1.225
 drivetrain_efficiency   = 0.95
-motor_efficiency        = 0.96
-motor_power_rated       = 760     # W   (2 × 380 W continuous)
 FC_MAX_POWER            = 1040    # W   (FC Stack LC 52.30 nominal max)
+
+# ── BAFANG RM G060.1000 6T 90A 48V — efficiency lookup ───────────────────────
+# 61 test points: normal operating region (~380 r/min, torque 0.6→31.4 N·m)
+# Source: factory test record 12403050001, 2024-03-05
+motor_power_rated = 1213.0  # W  (peak output: 1213.38 W at T=31.4 N·m, 369 r/min)
+
+_M_POUT = np.array([
+     24.19,  24.32,  24.25,  28.44,  28.30,  32.42,  36.48,  40.42,
+     44.70,  52.41,  56.89,  64.51,  72.95,  76.80,  84.89,  92.97,
+     96.76, 113.48, 116.92, 129.35, 137.79, 144.77, 173.82, 177.86,
+    206.16, 218.28, 229.22, 258.04, 258.71, 290.29, 310.45, 320.87,
+    353.88, 357.90, 390.07, 414.20, 421.14, 461.25, 477.30, 498.74,
+    541.47, 550.61, 590.51, 628.07, 636.72, 676.51, 716.31, 728.37,
+    771.91, 815.46, 830.83, 874.14, 921.39, 947.83, 972.64,1030.08,
+   1070.29,1091.75,1127.55,1170.18,1213.38
+])
+_M_ETA = np.array([
+    0.220, 0.218, 0.220, 0.251, 0.249, 0.279, 0.298, 0.314,
+    0.335, 0.383, 0.395, 0.423, 0.453, 0.452, 0.481, 0.492,
+    0.500, 0.565, 0.531, 0.571, 0.569, 0.582, 0.634, 0.620,
+    0.666, 0.652, 0.669, 0.673, 0.706, 0.713, 0.719, 0.713,
+    0.747, 0.728, 0.757, 0.764, 0.745, 0.772, 0.767, 0.765,
+    0.792, 0.776, 0.791, 0.809, 0.786, 0.799, 0.811, 0.793,
+    0.806, 0.816, 0.803, 0.813, 0.824, 0.817, 0.811, 0.826,
+    0.828, 0.821, 0.819, 0.824, 0.834
+])
+# Pre-sort by P_out (required by np.interp)
+_M_IDX   = np.argsort(_M_POUT)
+_M_POUT_S = _M_POUT[_M_IDX]
+_M_ETA_S  = _M_ETA[_M_IDX]
+
+def motor_eta_vec(p_out_W):
+    """η (0–1) from BAFANG RM G060.1000 test data. Vectorized, handles arrays."""
+    return np.interp(np.maximum(p_out_W, 0.0), _M_POUT_S, _M_ETA_S,
+                     left=_M_ETA_S[0], right=_M_ETA_S[-1])
 
 RESAMPLE_HZ  = 5
 SMOOTH_SEC   = 10
@@ -100,8 +138,9 @@ P_accel    = vehicle_mass * accel * v_smooth
 P_gradient = vehicle_mass * gravity * np.sin(np.deg2rad(inc_u)) * v_smooth
 
 P_wheel = P_rolling + P_aero + P_accel + P_gradient
-P_motor = np.where(P_wheel > 0, P_wheel / drivetrain_efficiency, 0.0)
-P_elec  = np.where(P_motor > 0, P_motor / motor_efficiency, 0.0)
+P_motor = np.where(P_wheel > 0, P_wheel / drivetrain_efficiency, 0.0)   # shaft output
+eta_m   = motor_eta_vec(P_motor)                                          # BAFANG lookup
+P_elec  = np.where(P_motor > 0, P_motor / eta_m, 0.0)
 P_elec  = np.clip(np.where(np.isfinite(P_elec), P_elec, 0.0), 0, None)
 
 # Component breakdown (only positive contributions)
@@ -124,14 +163,21 @@ e_accel = np.sum(np.maximum(P_accel_s, 0)) * dt_u / 3600
 e_grad  = np.sum(np.maximum(P_grad_s,  0)) * dt_u / 3600
 e_total = e_roll + e_aero + e_accel + e_grad
 
+mean_motor_eta = float(np.mean(eta_m[P_motor > 10]))
+eta_at_peak    = float(motor_eta_vec(P_motor.max()))
+
 print(f"\n=== POWER & ENERGY RESULTS (calibrated — 14.5 km / 11 laps) ===")
 print(f"  GPS scale    : {GPS_SPEED_SCALE:.4f}×")
 print(f"  Lap distance : {lap_dist_km*1000:.1f} m  (×11 = {lap_dist_km*11:.3f} km)")
 print(f"  Peak speed   : {v_smooth.max()*3.6:.1f} km/h")
-print(f"  Peak demand  : {P_elec.max():.1f} W")
+print(f"  Peak demand  : {P_elec.max():.1f} W  (FC max: {FC_MAX_POWER} W)")
 print(f"  Mean (moving): {P_elec[moving].mean():.1f} W")
 print(f"  Total energy : {energy_Wh:.2f} Wh/lap  ({energy_per_km:.2f} Wh/km)")
 print(f"  Over 11 laps : {energy_Wh*11:.2f} Wh  ({energy_Wh*11/1000:.3f} kWh)")
+print(f"\n  Motor (BAFANG RM G060.1000):")
+print(f"    Rated power  : {motor_power_rated:.0f} W")
+print(f"    η at peak    : {eta_at_peak*100:.1f}%  (P_shaft={P_motor.max():.0f} W)")
+print(f"    η mean (run) : {mean_motor_eta*100:.1f}%  (vs old fixed 96%)")
 print(f"\n  Energy breakdown:")
 print(f"    Rolling    : {e_roll:.2f} Wh  ({e_roll/e_total*100:.1f}%)")
 print(f"    Aero       : {e_aero:.2f} Wh  ({e_aero/e_total*100:.1f}%)")
@@ -304,3 +350,111 @@ plt.tight_layout()
 pwr_path = os.path.join(results_dir, 'power_vs_time_calibrated.png')
 fig2.savefig(pwr_path, dpi=150, bbox_inches='tight')
 print(f"Saved: {pwr_path}")
+
+# =============================================================================
+# FIGURE 3: MOTOR EFFICIENCY MAP — BAFANG RM G060.1000
+# =============================================================================
+# Full torque-speed-efficiency dataset from factory test record (all 106 points)
+_M_T_ALL = np.array([
+     0.6,  0.6,  0.6,  0.7,  0.7,  0.8,  0.9,  1.0,  1.1,  1.3,  1.4,
+     1.6,  1.8,  1.9,  2.1,  2.3,  2.4,  2.8,  2.9,  3.2,  3.4,  3.6,
+     4.3,  4.4,  5.1,  5.4,  5.7,  6.4,  6.4,  7.2,  7.7,  8.0,  8.8,
+     8.9,  9.7, 10.3, 10.5, 11.5, 11.9, 12.5, 13.5, 13.8, 14.8, 15.7,
+    16.0, 17.0, 18.0, 18.4, 19.5, 20.6, 21.1, 22.2, 23.4, 24.2, 24.9,
+    26.3, 27.4, 28.1, 29.1, 30.2, 31.4, 32.2, 33.3, 34.3, 35.5, 36.7,
+    37.7, 38.7, 39.8, 41.0, 41.9, 42.8, 43.8, 45.1, 45.8, 47.5, 48.3,
+    49.4, 50.6, 51.9, 52.0, 53.8, 54.2, 55.9, 56.9, 57.7, 58.8, 59.9,
+    61.1, 61.7, 63.7, 64.4, 65.4, 66.0, 67.5, 68.4, 70.1, 70.6, 71.8,
+    72.9, 73.6, 75.1, 75.8, 76.2, 76.7, 76.6
+])
+_M_N_ALL = np.array([
+    385, 387, 386, 388, 386, 387, 387, 386, 388, 385, 388,
+    385, 387, 386, 386, 386, 385, 387, 385, 386, 387, 384,
+    386, 386, 386, 386, 384, 386, 385, 385, 385, 383, 384,
+    384, 384, 384, 383, 383, 383, 381, 383, 381, 381, 382,
+    380, 380, 380, 378, 378, 378, 376, 376, 376, 374, 373,
+    374, 373, 371, 370, 370, 369, 354, 342, 331, 318, 308,
+    299, 290, 282, 273, 266, 258, 251, 243, 237, 231, 225,
+    218, 213, 207, 202, 197, 193, 187, 182, 178, 173, 169,
+    165, 160, 157, 153, 148, 145, 141, 137, 134, 130, 124,
+    115, 106,  97,  87,  68,  12,   0
+])
+_M_ETA_ALL = np.array([
+    22.0, 21.8, 22.0, 25.1, 24.9, 27.9, 29.8, 31.4, 33.5, 38.3, 39.5,
+    42.3, 45.3, 45.2, 48.1, 49.2, 50.0, 56.5, 53.1, 57.1, 56.9, 58.2,
+    63.4, 62.0, 66.6, 65.2, 66.9, 70.6, 67.3, 71.3, 71.9, 71.3, 74.7,
+    72.8, 75.7, 76.4, 74.5, 77.2, 76.7, 76.5, 79.2, 77.6, 79.1, 80.9,
+    78.6, 79.9, 81.1, 79.3, 80.6, 81.6, 80.3, 81.3, 82.4, 81.7, 81.1,
+    82.6, 82.8, 82.1, 81.9, 82.4, 83.4, 83.1, 83.0, 82.8, 82.2, 82.3,
+    82.1, 81.7, 81.7, 81.5, 81.2, 80.5, 80.2, 79.9, 79.1, 80.0, 79.1,
+    78.4, 78.5, 78.2, 76.5, 77.1, 76.2, 76.1, 75.4, 74.8, 74.1, 73.8,
+    73.5, 72.0, 72.9, 71.8, 70.6, 69.8, 69.4, 68.3, 68.5, 67.0, 65.8,
+    64.4, 62.4, 61.3, 57.9, 50.9, 16.6,  0.0
+])
+
+fig3, axes3 = plt.subplots(1, 3, figsize=(18, 6))
+fig3.suptitle(
+    'BAFANG RM G060.1000 6T 90A 48V — Motor Efficiency Analysis',
+    fontsize=14, fontweight='bold'
+)
+
+# Panel 1: Efficiency vs output power (test data + drive-cycle operating cloud)
+ax = axes3[0]
+p_curve = np.linspace(0, 1213, 400)
+eta_curve = motor_eta_vec(p_curve) * 100
+ax.plot(p_curve, eta_curve, color='navy', linewidth=2.5, label='BAFANG test data (61 pts)')
+ax.axvline(motor_power_rated, color='red',    linestyle='--', linewidth=1.5,
+           label=f'Rated: {motor_power_rated:.0f} W  (η={motor_eta_vec(motor_power_rated)*100:.1f}%)')
+ax.axvline(FC_MAX_POWER,      color='darkorange', linestyle='--', linewidth=1.5,
+           label=f'FC max: {FC_MAX_POWER} W')
+# Operating cloud from drive cycle
+ax.scatter(P_motor[P_motor > 5], eta_m[P_motor > 5] * 100,
+           s=4, color='crimson', alpha=0.35, zorder=3, label='Drive-cycle operating pts')
+ax.set_xlabel('Motor shaft output power (W)', fontsize=11)
+ax.set_ylabel('Motor efficiency (%)', fontsize=11)
+ax.set_title('η vs P_out — Test Data + Drive Cycle', fontsize=12, fontweight='bold')
+ax.legend(fontsize=9)
+ax.grid(True, linestyle='--', alpha=0.6)
+ax.set_xlim([0, 1300])
+ax.set_ylim([0, 95])
+
+# Panel 2: Torque–speed characteristic (all 106 test points, coloured by efficiency)
+ax = axes3[1]
+sc = ax.scatter(_M_T_ALL, _M_N_ALL, c=_M_ETA_ALL, cmap='RdYlGn',
+                vmin=0, vmax=85, s=30, zorder=3)
+cb = plt.colorbar(sc, ax=ax)
+cb.set_label('Efficiency (%)', fontsize=10)
+# Mark rated (peak-power) point
+ax.scatter([31.4], [369], color='navy', s=120, marker='*', zorder=5,
+           label=f'Rated: 31.4 N·m, 369 r/min\n1213 W, η=83.4%')
+ax.set_xlabel('Torque (N·m)', fontsize=11)
+ax.set_ylabel('Speed (r/min)', fontsize=11)
+ax.set_title('Torque–Speed Map (colour = efficiency)', fontsize=12, fontweight='bold')
+ax.legend(fontsize=9)
+ax.grid(True, linestyle='--', alpha=0.6)
+
+# Panel 3: Instantaneous motor efficiency over the drive cycle
+ax = axes3[2]
+moving_mask = P_motor > 10
+ax.plot(t_min_u, eta_m * 100, color='steelblue', linewidth=1.0, alpha=0.7,
+        label='Instantaneous η')
+ax.axhline(mean_motor_eta * 100, color='red', linestyle='--', linewidth=2,
+           label=f'Mean (running): {mean_motor_eta*100:.1f}%')
+ax.axhline(83.4, color='green', linestyle=':', linewidth=1.5,
+           label='Peak (datasheet): 83.4%')
+ax.fill_between(t_min_u, eta_m * 100, mean_motor_eta * 100,
+                where=eta_m > mean_motor_eta, color='green', alpha=0.15)
+ax.fill_between(t_min_u, eta_m * 100, mean_motor_eta * 100,
+                where=eta_m < mean_motor_eta, color='red',   alpha=0.15)
+ax.set_xlabel('Time (minutes)', fontsize=11)
+ax.set_ylabel('Motor efficiency (%)', fontsize=11)
+ax.set_title('Instantaneous η Over Drive Cycle', fontsize=12, fontweight='bold')
+ax.legend(fontsize=9)
+ax.grid(True, linestyle='--', alpha=0.6)
+ax.set_xlim([0, t_min_u[-1]])
+ax.set_ylim([0, 95])
+
+plt.tight_layout()
+eff_path = os.path.join(results_dir, 'motor_efficiency_map.png')
+fig3.savefig(eff_path, dpi=150, bbox_inches='tight')
+print(f"Saved: {eff_path}")
