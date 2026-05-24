@@ -11,20 +11,28 @@ enforce charge sustenance (ΔSOC ≈ 0) over the full 11-lap race.
 
 Fixes vs original implementation
 ─────────────────────────────────
-1. Local simulator clamps P_fc to [0, FC_P_MAX]: FC can be fully off during
-   glide. The ems_core version forces FC_P_MIN=100 W always, which causes
-   ~1 kW overcharge of the 10.67 Wh SC in seconds during zero-demand glide
-   phases and prevents bisection convergence.
+1. Local simulator clamps P_fc to [0, FC_P_MAX]: FC can be fully off.
+   The ems_core version forces FC_P_MIN=100 W always, which caused ~1 kW
+   overcharge of the 10.67 Wh SC in seconds during zero-demand glide
+   phases and prevented bisection convergence.
 
-2. ECMS Hamiltonian evaluated over 201 candidates including P_fc=0 W.
-   When P_fc=0: I_fc=0, ṁ_H2=0. During glide (P_dem≈0), H(0)=0 which
-   beats H(any P>0) = K_H2·I(P) + s·(-P)/ECMS_DENOM once s is reasonable,
-   so ECMS naturally selects FC-off during glide.
+2. H(0) vs H(P_fc*) comparison added to the continuous minimizer.
+   When P_dem=0: H(0) = 0, H(P_fc*) = K_H2·I(P_fc*) − s·P_fc*/ECMS_DENOM.
+   H(P_fc*) < H(0) means running the FC to charge SC is "free" in equivalent
+   H2 cost — valid ECMS behavior when s > s_breakeven ≈ 0.70.  The optimizer
+   now explicitly evaluates both candidates and picks the lower Hamiltonian.
+   At the tuned s ≈ 0.79, running FC at ~268 W during driving phases slightly
+   pre-charges the SC; during low-demand coast intervals the natural optimum
+   still falls near P_dem, so SC stays charge-sustained over the race.
 
 3. SOC boundary masking: hard gates block SC actions that would violate
-   SC_SOC_MAX (block further charging) or SC_SOC_MIN (block discharging).
-   This prevents the "charging past the ceiling" energy waste that made
-   power balance meaningless in the original.
+   SC_SOC_MAX (block further charging) or SC_SOC_MIN (block discharging)
+   when within 3 % of the respective hard limit.
+
+4. Bisection uses a tighter lo=0.1, hi=5.0 bracket and the continuous
+   interpolated P_fc* (not a coarse discrete grid) so ΔSOC(s) varies
+   smoothly — the 5 W resolution of a 201-point grid causes discrete ΔSOC
+   steps larger than the 0.01 tolerance and prevents convergence.
 
 Reference: Paganelli et al. (2002), "General supervisory control policy for
            the energy optimisation in charge-sustaining hybrid electric vehicles."
@@ -125,44 +133,87 @@ def simulate_race_ecms(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
     }
 
 
-# ── ECMS Hamiltonian with 201-point grid (0 W included) ──────────────────────
-# H(P_fc) = K_H2·I_fc(P_fc) + s·(P_dem − P_fc)/ECMS_DENOM
+# ── Continuous Hamiltonian minimizer with P_fc = 0 option ────────────────────
+# Pre-build a high-resolution I_fc table and its derivative dI/dP_fc.
+# The optimality condition dH/dP_fc = 0 reduces to:
+#     K_H2 · dI_fc/dP_fc  =  s / ECMS_DENOM
+# Precomputing dI/dP_fc allows us to solve this by scalar interpolation in O(1).
 #
-# With P_fc = 0 in the grid:
-#   H(0) = 0 + s·P_dem/ECMS_DENOM   (only SC-equivalent cost, no H2 burned)
-# During glide (P_dem ≈ 0): H(0) ≈ 0, which beats any positive P_fc.
-# During driving: ECMS finds the optimal split between H2 cost and SC cost.
-_P_CANDS = np.linspace(0.0, FC_P_MAX, 201)   # 0 W included
+# P_fc = 0 is also a valid candidate: H(0) = s·P_dem/ECMS_DENOM
+# (no H2 burned, SC provides P_dem entirely).
+# The minimizer compares H(0) with H(P_fc*) and takes the lower one.
+_P_HI  = np.linspace(0.1, FC_P_MAX, 100_000)   # high-res grid (excludes 0)
+_I_HI  = fc_current(_P_HI)                      # I_fc [A]
+_dI_HI = np.gradient(_I_HI, _P_HI[1] - _P_HI[0])  # dI_fc/dP_fc [A/W]
+
+# Also keep a 201-point candidate array for reference / plotting
+_P_CANDS = np.linspace(0.0, FC_P_MAX, 201)
+
+
+def _opt_pfc(s, P_dem, SOC):
+    """
+    Solve dH/dP_fc = 0 for the interior optimum P_fc*, then compare with P=0.
+
+    The interior optimum satisfies:
+        K_H2·dI/dP_fc = s/ECMS_DENOM
+
+    Falls back to the boundary (FC_P_MAX) if dI/dP_fc is monotone and the
+    target slope lies outside the achievable range.
+
+    Returns the P_fc (in [0, FC_P_MAX]) that minimises H, after also applying
+    SOC boundary masking to prevent hard-limit violations.
+    """
+    target = s / (K_H2 * ECMS_DENOM)
+    dI_min, dI_max = _dI_HI.min(), _dI_HI.max()
+
+    if target <= dI_min:
+        P_interior = _P_HI[0]   # H monotonically increasing → minimum at lower bound
+    elif target >= dI_max:
+        P_interior = FC_P_MAX   # H monotonically decreasing → minimum at upper bound
+    else:
+        g = _dI_HI - target
+        sign_changes = np.where(np.diff(np.sign(g)))[0]
+        if len(sign_changes) == 0:
+            P_interior = float(_P_HI[np.argmin(np.abs(g))])
+        else:
+            i = sign_changes[0]
+            P_interior = float(np.interp(0.0, [g[i], g[i + 1]], [_P_HI[i], _P_HI[i + 1]]))
+
+    # Evaluate H at the interior optimum and at P_fc = 0
+    I_int  = float(fc_current(P_interior))
+    H_int  = K_H2 * I_int + s * (P_dem - P_interior) / ECMS_DENOM
+    H_zero = s * P_dem / ECMS_DENOM   # I=0 when P_fc=0, no H2 burned
+
+    # Choose the lower-H candidate
+    P_best = 0.0 if H_zero <= H_int else P_interior
+
+    # SOC boundary masking: override if the chosen action would violate limits
+    P_sc_best = P_dem - P_best
+    if SOC >= SC_SOC_MAX - 0.03 and P_sc_best < -10.0:
+        # SC nearly full: block further charging → move FC toward demand
+        P_best = float(np.clip(P_dem, 0.0, FC_P_MAX))
+    if SOC <= SC_SOC_MIN + 0.03 and P_sc_best > 10.0:
+        # SC nearly empty: block further discharging → raise FC toward demand
+        P_best = float(np.clip(P_dem, 0.0, FC_P_MAX))
+
+    return float(P_best)
 
 
 def make_strategy(s):
     """
-    Return a strategy function that minimises H(P_fc) for equivalence factor s,
-    with SOC boundary masking to prevent hard-limit violations.
+    Return a strategy function that minimises H(P_fc) for equivalence factor s.
 
-    Higher s → SC discharge penalised more → FC runs higher → SOC recovers.
-    Lower s  → SC discharge tolerated     → FC runs leaner → SOC depletes.
+    H(P_fc) = K_H2·I_fc(P_fc)  +  s·(P_dem − P_fc) / ECMS_DENOM
+
+    Units of both terms: [g/s] (hydrogen mass flow equivalent).
+    - Higher s → SC discharge penalised more → FC commanded higher → SOC recovers.
+    - Lower s  → SC discharge tolerated     → FC runs leaner   → SOC depletes.
+
+    Ramp-rate and saturation constraints are applied by simulate_race_ecms()
+    after this function returns.
     """
     def strategy_fn(P_dem, SOC, P_fc_prev, t_in_lap, lap_idx):
-        # H2 flow for each candidate (0 W → 0 A → 0 g/s)
-        I_arr   = np.where(_P_CANDS > 0, fc_current(_P_CANDS), 0.0)
-        mdot_fc = K_H2 * I_arr                         # [g/s]
-        mdot_sc = (P_dem - _P_CANDS) / ECMS_DENOM      # [g/s] (negative = charging)
-        H       = mdot_fc + s * mdot_sc                # Hamiltonian
-
-        # SOC boundary masking: block SC actions that would violate hard limits
-        P_sc_c = P_dem - _P_CANDS
-        mask = np.ones(201, dtype=bool)
-        if SOC >= SC_SOC_MAX - 0.03:      # SC nearly full → block further charging
-            mask[P_sc_c < -10.0] = False
-        if SOC <= SC_SOC_MIN + 0.03:      # SC nearly empty → block further discharging
-            mask[P_sc_c >  10.0] = False
-
-        H_masked = np.where(mask, H, np.inf)
-        best_idx = int(np.argmin(H_masked))
-        if not np.isfinite(H_masked[best_idx]):         # fallback: match demand
-            return float(np.clip(P_dem, 0.0, FC_P_MAX))
-        return float(_P_CANDS[best_idx])
+        return _opt_pfc(s, P_dem, SOC)
 
     return strategy_fn
 
