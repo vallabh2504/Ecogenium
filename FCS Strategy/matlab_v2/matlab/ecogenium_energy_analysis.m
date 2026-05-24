@@ -28,7 +28,7 @@ fprintf('  Distance: %.3f km\n', data.Distance_km(end));
 fprintf('\nVehicle parameters:\n');
 
 % Assuming standard Eco-marathon prototype weights (Car + Driver)
-vehicle_mass = 160;
+vehicle_mass = 175;
 wheel_radius = 0.275;
 gravity = 9.81;
 motor_gear_ratio = 5.6;

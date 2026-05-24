@@ -16,7 +16,7 @@ clear all; close all; clc;
 fprintf('\n=== VEHICLE PARAMETERS ===\n');
 
 % Given parameters
-vehicle_mass = 160;  % kg
+vehicle_mass = 175;  % kg
 wheel_radius = 0.295;  % meters
 gravity = 9.81;  % m/s^2
 
@@ -25,7 +25,7 @@ drag_coefficient = 0.15;  % Cd (very aerodynamic for Eco-marathon)
 frontal_area = 0.8;  % m^2 (typical for urban concept)
 rolling_resistance_coef = 0.006;  % Crr (low rolling resistance tires)
 air_density = 1.225;  % kg/m^3 (sea level)
-drivetrain_efficiency = 0.85;  % 85% efficiency (motor + transmission)
+drivetrain_efficiency = 0.95;  % Updated: realistic chain/hub efficiency for eco-marathon
 
 % Motor specifications (Hydraix twin 380W motors)
 motor_power_rated = 760;  % Watts (2 x 380W)
@@ -60,14 +60,20 @@ incline_deg = data.inc_angle_deg; % NEW: Extract Incline Angle
 % Convert speed to m/s
 speed_ms = speed_kmh / 3.6;
 
-% Calculate acceleration
+% FIX: Smooth velocity BEFORE differentiating — raw GPS velocity is noisy;
+% differentiating first amplifies noise into huge acceleration spikes (P_accel = m*a*v).
+avg_sample_rate_val = 1 / mean(diff(time));
+vel_window = round(10 * avg_sample_rate_val); % 10-second velocity smoothing window
+speed_ms_smooth = movmean(speed_ms, vel_window);
+
 dt = diff(time);
-dt = [dt(1); dt];  % Pad to match length
-acceleration = [0; diff(speed_ms)] ./ dt;
-acceleration = movmean(acceleration, 10);  % Smooth acceleration
+dt(dt < 0.01) = mean(diff(time)); % Prevent tiny GPS timestamp gaps causing infinite acceleration
+dt = [dt(1); dt];                 % Pad to match length
+acceleration = [0; diff(speed_ms_smooth)] ./ dt;
+acceleration = movmean(acceleration, 30); % 30-point post-smoothing on acceleration
 
 fprintf('Drive cycle loaded: %.1f minutes\n', max(time)/60);
-fprintf('Max speed: %.1f km/h (%.1f m/s)\n', max(speed_kmh), max(speed_ms));
+fprintf('Max speed: %.1f km/h (%.1f m/s, smoothed)\n', max(speed_kmh), max(speed_ms_smooth));
 
 %% ========================================================================
 % POWER DEMAND CALCULATION
@@ -83,8 +89,8 @@ P_total_wheel = zeros(size(speed_ms));
 P_motor_output = zeros(size(speed_ms));
 P_electrical_input = zeros(size(speed_ms));
 
-for i = 1:length(speed_ms)
-    v = speed_ms(i);
+for i = 1:length(speed_ms_smooth)
+    v = speed_ms_smooth(i);
     a = acceleration(i);
     
     % 1. Rolling Resistance Power
@@ -138,7 +144,7 @@ P_accel(~isfinite(P_accel)) = 0;
 P_gradient(~isfinite(P_gradient)) = 0; % NEW
 
 fprintf('Peak power demand: %.0f W\n', max(P_electrical_input));
-fprintf('Average power (when moving): %.0f W\n', mean(P_electrical_input(speed_ms > 0)));
+fprintf('Average power (when moving): %.0f W\n', mean(P_electrical_input(speed_ms_smooth > 0)));
 
 %% ========================================================================
 % ENERGY CONSUMPTION CALCULATION
@@ -214,9 +220,9 @@ title('Cumulative Energy Consumption', 'FontSize', 14, 'FontWeight', 'bold');
 grid on;
 set(gca, 'Color', 'white');
 
-% Subplot 4: Power vs Speed 
+% Subplot 4: Power vs Speed
 subplot(3,2,4);
-scatter(speed_kmh, P_electrical_input, 10, time, 'filled');
+scatter(data.Speed_kmh, P_electrical_input, 10, time, 'filled');
 xlabel('Speed (km/h)', 'FontSize', 12);
 ylabel('Power (W)', 'FontSize', 12);
 title('Power Demand vs Speed', 'FontSize', 14, 'FontWeight', 'bold');
@@ -230,8 +236,8 @@ subplot(3,2,5);
 window_size = 50;
 energy_per_km_local = zeros(size(P_electrical_input));
 for i = 1:length(energy_per_km_local)
-    if speed_ms(i) > 0.1  % Only when moving
-        energy_per_km_local(i) = P_electrical_input(i) / (speed_ms(i) * 3600);
+    if speed_ms_smooth(i) > 0.1  % Only when moving
+        energy_per_km_local(i) = P_electrical_input(i) / (speed_ms_smooth(i) * 3600);
     else
         energy_per_km_local(i) = 0;
     end
@@ -310,7 +316,7 @@ fprintf('\n=== ENERGY ANALYSIS COMPLETE ===\n');
 % EXPORT RESULTS
 % =========================================================================
 % NEW: Added P_gradient to the exported results
-results_table = table(time, speed_kmh, speed_ms, rpm, incline_deg, ...
+results_table = table(time, speed_kmh, speed_ms_smooth, rpm, incline_deg, ...
     P_rolling, P_aero, P_accel, P_gradient, P_total_wheel, P_motor_output, P_electrical_input, ...
     cumulative_energy_Wh, ...
     'VariableNames', {'Time_sec', 'Speed_kmh', 'Speed_ms', 'MotorRPM', 'Incline_deg', ...
