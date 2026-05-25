@@ -16,7 +16,6 @@
 fprintf('\n=== LOADING CANONICAL DRIVE CYCLE ===\n');
 
 %% Load Data
-data = readtable('canonical_drive_cycle_35min.csv');
 data = readtable('canonical_with_incline.csv');
 
 % --- ADD THIS FILTER TO FIX FIGURE 1 ---

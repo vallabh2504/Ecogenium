@@ -1,11 +1,11 @@
 """
 EMS Core — Shared infrastructure for Hydraix I energy management simulation.
 
-System:  balticFuelCells LC 52.30 FC + Maxwell 100F/32V supercap + BAFANG motor
+System:  balticFuelCells LC 52.30 FC + Maxwell 87F/32V supercap + BAFANG motor
 Race:    Silesia Ring SEM 2026, 11 laps × 14.5 km, ~35 min (3.18 min/lap)
 
-Supercapacitor module: 100F / 32V (three Maxwell BMOD0058 E016 C02 in parallel,
-two sets in series), mass ≈ 1.89 kg, E_sc = 10.67 Wh, R_esr = 15 mΩ.
+Supercapacitor module: 87F / 32V (three Maxwell BMOD0058 E016 C02 in parallel,
+two sets in series), mass ≈ 1.89 kg, E_sc = 9.28 Wh, R_esr = 15 mΩ.
 
 FC model: Chamberline-Kim polarization, calibrated to LC 52.30 nameplate.
   P_net_max = 1013 W @ 37.5 A (net, after BOP).
@@ -19,7 +19,7 @@ Public API
   fc_h2_rate(I_fc)          → ṁ_H2 [g/s]
   sc_voltage(soc)           → V_sc [V]
   sc_soc_update(soc, P_sc_W, dt) → new_soc
-  simulate_race(strategy_fn, SOC_0, verbose) → results dict
+  simulate_race(strategy_fn, SOC_0, verbose, fc_can_off) → results dict
 
 Constants exported
 ──────────────────
@@ -201,12 +201,12 @@ ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 49 800 W/(g/s)
 
 # ── Supercapacitor model ───────────────────────────────────────────────────────
 # Maxwell BMOD0058 E016 C02 ×3 parallel, ×2 series  (assumed simulation module)
-SC_C       = 100.0    # F
+SC_C       = 87.0     # F  (Maxwell BMOD0058 E016 C02: 3P × 2S → 3×58F/2 = 87F)
 SC_V_MAX   = 32.0     # V  (2 × 16 V rated)
 SC_V_MIN   = 16.0     # V  (minimum usable: 75 % energy retained above here)
 SC_ESR     = 0.015    # Ω  (3-parallel ESR reduction from 44 mΩ per pair)
 SC_ETA     = 0.95     # round-trip efficiency (converter + SC losses)
-SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # 38 400 J = 10.67 Wh
+SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # 33 408 J = 9.28 Wh
 
 SC_SOC_0   = 0.60     # initial & reference SOC
 SC_SOC_MIN = 0.15     # hard floor
@@ -233,7 +233,7 @@ def sc_soc_update(soc, P_sc_W, dt):
 
 
 # ── Race simulation engine ─────────────────────────────────────────────────────
-def simulate_race(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
+def simulate_race(strategy_fn, SOC_0=SC_SOC_0, verbose=False, fc_can_off=False):
     """
     Run the full 11-lap race simulation with the given energy management strategy.
 
@@ -250,6 +250,14 @@ def simulate_race(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
 
     verbose : bool
         Print per-lap SOC and H2 summary if True.
+
+    fc_can_off : bool
+        If True: FC can be fully shut down (P_fc = 0 allowed). Upward ramp is
+        limited by FC_RAMP; instantaneous shutdown is permitted. Used by
+        strategies with glide phases (B, C). I_fc is set to 0 when
+        P_fc_cmd < FC_P_MIN to prevent fc_current() clip artefacts.
+        If False (default): FC is always held in [FC_P_MIN, FC_P_MAX] and
+        both up- and down-ramps are rate-limited.
 
     Returns
     -------
@@ -285,7 +293,9 @@ def simulate_race(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
 
     SOC_ar[0]  = SOC_0
     lap_SOC[0] = SOC_0
-    P_fc_prev  = FC_P_MIN
+    # FC starts off when glide is allowed; otherwise held at idle floor
+    P_fc_prev  = 0.0 if fc_can_off else FC_P_MIN
+    P_min      = 0.0 if fc_can_off else FC_P_MIN
 
     for k in range(n):
         lap_idx  = k // N_pts
@@ -297,24 +307,31 @@ def simulate_race(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
         P_fc_cmd = float(strategy_fn(Pd, soc_k, P_fc_prev, t_in_lap, lap_idx))
 
         # ── FC ramp-rate and saturation constraints ─────────────────────────
-        P_fc_cmd = float(np.clip(P_fc_cmd,
-                                 P_fc_prev - FC_RAMP * DT,
-                                 P_fc_prev + FC_RAMP * DT))
-        P_fc_cmd = float(np.clip(P_fc_cmd, FC_P_MIN, FC_P_MAX))
+        if fc_can_off:
+            # Allow instant shutdown; only limit upward ramp
+            if P_fc_cmd > P_fc_prev:
+                P_fc_cmd = min(P_fc_cmd, P_fc_prev + FC_RAMP * DT)
+        else:
+            # Symmetric ramp limiting in both directions
+            P_fc_cmd = float(np.clip(P_fc_cmd,
+                                     P_fc_prev - FC_RAMP * DT,
+                                     P_fc_prev + FC_RAMP * DT))
+        P_fc_cmd = float(np.clip(P_fc_cmd, P_min, FC_P_MAX))
 
         P_sc_k = Pd - P_fc_cmd
 
         # ── SC floor protection: force FC max before SC hits hard floor ─────
         trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
         if P_sc_k > 0 and trial_soc <= SC_SOC_MIN:
-            P_fc_cmd = float(np.clip(Pd, FC_P_MIN, FC_P_MAX))
+            P_fc_cmd = float(np.clip(Pd, P_min, FC_P_MAX))
             P_sc_k   = max(0.0, Pd - P_fc_cmd)
             trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
 
         P_fc_ar[k]   = P_fc_cmd
         P_sc_ar[k]   = P_sc_k
         SOC_ar[k + 1] = trial_soc
-        I_fc_ar[k]   = float(fc_current(P_fc_cmd))
+        # Guard: fc_current() clips to FC_P_MIN, so set I=0 when FC is truly off
+        I_fc_ar[k]   = float(fc_current(P_fc_cmd)) if P_fc_cmd >= FC_P_MIN else 0.0
         m_H2_ar[k]   = fc_h2_rate(I_fc_ar[k]) * DT
         P_fc_prev    = P_fc_cmd
 

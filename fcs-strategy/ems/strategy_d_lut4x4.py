@@ -128,7 +128,7 @@ def simulate_race_d(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
 
         P_fc_ar[k]    = P_cmd;  P_sc_ar[k] = P_sc_k
         SOC_ar[k + 1] = trial_soc
-        I_fc_ar[k]    = float(fc_current(P_cmd)) if P_cmd > 0 else 0.0
+        I_fc_ar[k]    = float(fc_current(P_cmd)) if P_cmd >= FC_P_MIN else 0.0
         m_H2_ar[k]    = fc_h2_rate(I_fc_ar[k]) * DT
         level_ar[k]   = lv;  P_fc_prev = P_cmd
 
@@ -175,128 +175,125 @@ def make_strategy(P_cruise):
     return strategy_fn
 
 
-# ── Bisection on P_CRUISE (L2) ────────────────────────────────────────────────
-TOLERANCE = 0.01
-P_cruise  = 270.0          # starting guess (slightly above race avg 259 W)
-lo, hi    = L1_W + 1, FC_P_MAX
-best_result = None
+# ── Standalone analysis (bisection + plots) ───────────────────────────────────
+if __name__ == '__main__':
 
-print(f"\nTuning P_cruise (L2) for charge sustenance (|ΔSOC| < {TOLERANCE}) ...")
-for iteration in range(30):
-    result    = simulate_race_d(make_strategy(P_cruise), SOC_0=SC_SOC_0)
-    delta_soc = result['delta_SOC']
-    print(f"  Iter {iteration + 1:2d}  P_cruise={P_cruise:6.1f} W  "
-          f"ΔSOC={delta_soc:+.4f}  H2={result['m_H2_total']:.3f} g")
+    # ── Bisection on P_CRUISE (L2) ────────────────────────────────────────────
+    TOLERANCE = 0.01
+    P_cruise  = 270.0          # starting guess (slightly above race avg 259 W)
+    lo, hi    = L1_W + 1, FC_P_MAX
+    best_result = None
 
-    if abs(delta_soc) <= TOLERANCE:
+    print(f"\nTuning P_cruise (L2) for charge sustenance (|ΔSOC| < {TOLERANCE}) ...")
+    for iteration in range(30):
+        result    = simulate_race_d(make_strategy(P_cruise), SOC_0=SC_SOC_0)
+        delta_soc = result['delta_SOC']
+        print(f"  Iter {iteration + 1:2d}  P_cruise={P_cruise:6.1f} W  "
+              f"ΔSOC={delta_soc:+.4f}  H2={result['m_H2_total']:.3f} g")
+
+        if abs(delta_soc) <= TOLERANCE:
+            best_result = result
+            break
+
+        if delta_soc < -TOLERANCE:
+            lo = P_cruise       # SC depleting → raise cruise
+        else:
+            hi = P_cruise       # SC overcharging → lower cruise
+        P_cruise    = (lo + hi) / 2
         best_result = result
-        break
 
-    if delta_soc < -TOLERANCE:
-        lo = P_cruise       # SC depleting → raise cruise
-    else:
-        hi = P_cruise       # SC overcharging → lower cruise
-    P_cruise    = (lo + hi) / 2
-    best_result = result
+    if best_result is None:
+        best_result = result
 
-if best_result is None:
-    best_result = result
+    # ── Extract results ───────────────────────────────────────────────────────
+    t         = best_result['t'];       P_dem_r = best_result['P_dem']
+    P_fc_r    = best_result['P_fc'];    P_sc_r  = best_result['P_sc']
+    SOC_r     = best_result['SOC'];     I_fc_r  = best_result['I_fc']
+    lv_r      = best_result['level']
+    m_H2_total = best_result['m_H2_total']
+    delta_soc  = best_result['delta_SOC']
+    lap_SOC    = best_result['lap_SOC']
 
-# ── Extract results ───────────────────────────────────────────────────────────
-t         = best_result['t'];       P_dem_r = best_result['P_dem']
-P_fc_r    = best_result['P_fc'];    P_sc_r  = best_result['P_sc']
-SOC_r     = best_result['SOC'];     I_fc_r  = best_result['I_fc']
-lv_r      = best_result['level']
-m_H2_total = best_result['m_H2_total']
-delta_soc  = best_result['delta_SOC']
-lap_SOC    = best_result['lap_SOC']
+    t_min   = t / 60.0
+    cum_H2  = np.cumsum(K_H2 * I_fc_r * DT)
+    mean_pfc = float(np.mean(P_fc_r))
+    occ     = {i: float(np.mean(lv_r == i)) * 100 for i in range(4)}
 
-t_min   = t / 60.0
-cum_H2  = np.cumsum(K_H2 * I_fc_r * DT)
-mean_pfc = float(np.mean(P_fc_r))
-occ     = {i: float(np.mean(lv_r == i)) * 100 for i in range(4)}
+    # ── Results plot ──────────────────────────────────────────────────────────
+    LEVEL_COLORS = ['#888888', '#00C853', '#1565C0', '#E65100']
+    LEVEL_LABELS = [f'L0  0 W (glide)', f'L1 {L1_W:.0f} W (peak η {L1_ETA:.0f}%)',
+                    f'L2 {P_cruise:.0f} W (cruise)', f'L3 {L3_W:.0f} W (boost)']
 
-# ── Results plot ──────────────────────────────────────────────────────────────
-LEVEL_COLORS = ['#888888', '#00C853', '#1565C0', '#E65100']
-LEVEL_LABELS = [f'L0  0 W (glide)', f'L1 {L1_W:.0f} W (peak η {L1_ETA:.0f}%)',
-                f'L2 {P_cruise:.0f} W (cruise)', f'L3 {L3_W:.0f} W (boost)']
+    fig, axes = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
+    fig.suptitle(
+        f"Strategy D — 4×4 Discrete Efficiency-Point LUT  |  "
+        f"ΔSOC={delta_soc:+.4f}  |  H₂={m_H2_total:.3f} g  |  "
+        f"P_cruise={P_cruise:.1f} W",
+        fontsize=11
+    )
 
-fig, axes = plt.subplots(4, 1, figsize=(14, 12), sharex=True)
-fig.suptitle(
-    f"Strategy D — 4×4 Discrete Efficiency-Point LUT  |  "
-    f"ΔSOC={delta_soc:+.4f}  |  H₂={m_H2_total:.3f} g  |  "
-    f"P_cruise={P_cruise:.1f} W",
-    fontsize=11
-)
+    ax0 = axes[0]
+    ax0.plot(t_min, P_dem_r, color='black', lw=0.5, alpha=0.55, label='P_dem')
+    ax0.plot(t_min, P_fc_r,  color='#D32F2F', lw=0.8, label='P_fc (actual)')
+    for lv_i, lv_c, lv_l in zip(range(1, 4), LEVEL_COLORS[1:], LEVEL_LABELS[1:]):
+        lv_val = [L0_W, L1_W, P_cruise, L3_W][lv_i]
+        ax0.axhline(lv_val, color=lv_c, lw=1.0, ls='--', alpha=0.65, label=lv_l)
+    ax0.set_ylabel('Power [W]')
+    ax0.legend(loc='upper right', fontsize=7.5, ncol=2)
+    ax0.grid(True, lw=0.3)
 
-ax0 = axes[0]
-ax0.plot(t_min, P_dem_r, color='black', lw=0.5, alpha=0.55, label='P_dem')
-ax0.plot(t_min, P_fc_r,  color='#D32F2F', lw=0.8, label='P_fc (actual)')
-for lv_i, lv_c, lv_l in zip(range(1, 4), LEVEL_COLORS[1:], LEVEL_LABELS[1:]):
-    lv_val = [L0_W, L1_W, P_cruise, L3_W][lv_i]
-    ax0.axhline(lv_val, color=lv_c, lw=1.0, ls='--', alpha=0.65, label=lv_l)
-ax0.set_ylabel('Power [W]')
-ax0.legend(loc='upper right', fontsize=7.5, ncol=2)
-ax0.grid(True, lw=0.3)
+    # Level band background
+    for k_s in range(0, len(t_min) - 1, 1):
+        lv = lv_r[k_s]
+        ax0.axvspan(t_min[k_s], t_min[min(k_s + 1, len(t_min) - 1)],
+                    color=LEVEL_COLORS[lv], alpha=0.04, linewidth=0)
 
-# Level band background
-for k_s in range(0, len(t_min) - 1, 1):
-    lv = lv_r[k_s]
-    ax0.axvspan(t_min[k_s], t_min[min(k_s + 1, len(t_min) - 1)],
-                color=LEVEL_COLORS[lv], alpha=0.04, linewidth=0)
+    ax1 = axes[1]
+    ax1.plot(t_min, SOC_r, color='green', lw=0.8)
+    ax1.axhline(SC_SOC_0,   color='black',  lw=0.8, ls='--', label=f'SOC₀={SC_SOC_0}')
+    ax1.axhline(SC_SOC_MIN, color='red',    lw=0.8, ls=':',  label=f'SOC_MIN={SC_SOC_MIN}')
+    ax1.axhline(SC_SOC_MAX, color='purple', lw=0.8, ls=':',  label=f'SOC_MAX={SC_SOC_MAX}')
+    for thresh in SOC_BANDS:
+        ax1.axhline(thresh, color='grey', lw=0.6, ls=':', alpha=0.45, label=f'band {thresh}')
+    ax1.set_ylabel('SC SOC [—]')
+    ax1.legend(loc='upper right', fontsize=7, ncol=2)
+    ax1.grid(True, lw=0.3)
 
-ax1 = axes[1]
-ax1.plot(t_min, SOC_r, color='green', lw=0.8)
-ax1.axhline(SC_SOC_0,   color='black',  lw=0.8, ls='--', label=f'SOC₀={SC_SOC_0}')
-ax1.axhline(SC_SOC_MIN, color='red',    lw=0.8, ls=':',  label=f'SOC_MIN={SC_SOC_MIN}')
-ax1.axhline(SC_SOC_MAX, color='purple', lw=0.8, ls=':',  label=f'SOC_MAX={SC_SOC_MAX}')
-for thresh in SOC_BANDS:
-    ax1.axhline(thresh, color='grey', lw=0.6, ls=':', alpha=0.45, label=f'band {thresh}')
-ax1.set_ylabel('SC SOC [—]')
-ax1.legend(loc='upper right', fontsize=7, ncol=2)
-ax1.grid(True, lw=0.3)
+    ax2 = axes[2]
+    ax2.plot(t_min, I_fc_r, color='firebrick', lw=0.6)
+    for lv_i, lv_c in zip(range(1, 4), LEVEL_COLORS[1:]):
+        lv_val = [L0_W, L1_W, P_cruise, L3_W][lv_i]
+        if lv_val > 0:
+            ax2.axhline(float(fc_current(lv_val)), color=lv_c, lw=0.8, ls='--', alpha=0.5)
+    ax2.set_ylabel('I_fc [A]')
+    ax2.grid(True, lw=0.3)
 
-ax2 = axes[2]
-ax2.plot(t_min, I_fc_r, color='firebrick', lw=0.6)
-for lv_i, lv_c in zip(range(1, 4), LEVEL_COLORS[1:]):
-    lv_val = [L0_W, L1_W, P_cruise, L3_W][lv_i]
-    if lv_val > 0:
-        ax2.axhline(float(fc_current(lv_val)), color=lv_c, lw=0.8, ls='--', alpha=0.5)
-ax2.set_ylabel('I_fc [A]')
-ax2.grid(True, lw=0.3)
+    ax3 = axes[3]
+    ax3.plot(t_min, cum_H2, color='darkviolet', lw=0.8)
+    ax3.set_ylabel('Cumulative H₂ [g]')
+    ax3.set_xlabel('Time [min]')
+    ax3.grid(True, lw=0.3)
 
-ax3 = axes[3]
-ax3.plot(t_min, cum_H2, color='darkviolet', lw=0.8)
-ax3.set_ylabel('Cumulative H₂ [g]')
-ax3.set_xlabel('Time [min]')
-ax3.grid(True, lw=0.3)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    out_path = os.path.join(RESULTS_DIR, 'strategy_d_lut4x4_results.png')
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"\nFigure → {out_path}")
 
-fig.tight_layout(rect=[0, 0, 1, 0.96])
-out_path = os.path.join(RESULTS_DIR, 'strategy_d_lut4x4_results.png')
-fig.savefig(out_path, dpi=150)
-plt.close(fig)
-print(f"\nFigure → {out_path}")
-
-# ── Summary ───────────────────────────────────────────────────────────────────
-eta_cruise = float(np.interp(P_cruise, _fc_pnet(_I), _fc_eta(_I))) if _HAVE_FC else 0.0
-print()
-print("=== Strategy D: 4×4 Discrete Efficiency-Point LUT ===")
-print(f"  L0 GLIDE    :   0.0 W  (FC off)")
-print(f"  L1 PEAK     : {L1_W:5.1f} W  (η={L1_ETA:.1f}% — peak from FC model v3)")
-print(f"  L2 CRUISE   : {P_cruise:5.1f} W  (η≈{eta_cruise:.1f}% — tuned for charge sustenance)")
-print(f"  L3 BOOST    : {L3_W:5.1f} W  (fixed SC emergency recharge)")
-print(f"  Final ΔSOC  : {delta_soc:+.4f}  (target |ΔSOC| < {TOLERANCE})")
-print(f"  H₂ consumed : {m_H2_total:.3f} g")
-print(f"  Sustained   : {'YES ✓' if abs(delta_soc) <= TOLERANCE else 'NO ✗'}")
-print(f"  Iterations  : {iteration + 1}")
-print(f"  Mean P_fc   : {mean_pfc:.1f} W")
-print(f"  Level occupancy:")
-for lv_i, lv_l in enumerate(LEVEL_LABELS):
-    print(f"    {lv_l:30s}: {occ[lv_i]:.1f}%")
-print("======================================================")
-print()
-print("── Comparison ──")
-print(f"  Strategy A (LUT continuous)   : 8.204 g  ΔSOC=+0.006")
-print(f"  Strategy B (FSM)              : 8.425 g  ΔSOC=-0.003")
-print(f"  Strategy C (ECMS/PMP)         : 8.197 g  ΔSOC=-0.007")
-print(f"  Strategy D (4×4 discrete)     : {m_H2_total:.3f} g  ΔSOC={delta_soc:+.3f}")
+    # ── Summary ───────────────────────────────────────────────────────────────
+    eta_cruise = float(np.interp(P_cruise, _fc_pnet(_I), _fc_eta(_I))) if _HAVE_FC else 0.0
+    print()
+    print("=== Strategy D: 4×4 Discrete Efficiency-Point LUT ===")
+    print(f"  L0 GLIDE    :   0.0 W  (FC off)")
+    print(f"  L1 PEAK     : {L1_W:5.1f} W  (η={L1_ETA:.1f}% — peak from FC model v3)")
+    print(f"  L2 CRUISE   : {P_cruise:5.1f} W  (η≈{eta_cruise:.1f}% — tuned for charge sustenance)")
+    print(f"  L3 BOOST    : {L3_W:5.1f} W  (fixed SC emergency recharge)")
+    print(f"  Final ΔSOC  : {delta_soc:+.4f}  (target |ΔSOC| < {TOLERANCE})")
+    print(f"  H₂ consumed : {m_H2_total:.3f} g")
+    print(f"  Sustained   : {'YES ✓' if abs(delta_soc) <= TOLERANCE else 'NO ✗'}")
+    print(f"  Iterations  : {iteration + 1}")
+    print(f"  Mean P_fc   : {mean_pfc:.1f} W")
+    print(f"  Level occupancy:")
+    for lv_i, lv_l in enumerate(LEVEL_LABELS):
+        print(f"    {lv_l:30s}: {occ[lv_i]:.1f}%")
+    print("======================================================")

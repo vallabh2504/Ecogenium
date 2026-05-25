@@ -81,7 +81,7 @@ fprintf('\n=====================================================================
 fprintf('RUNNING MODULE 3: ENERGY AND POWER ANALYSIS (v2.0)\n');
 fprintf('========================================================================\n');
 try
-    ecogenium_energy_analysis;
+    ecogenium_energy_analysis_1;
     fprintf('\n✓ Module 3 completed successfully.\n');
 catch ME
     fprintf('\n✗ Module 3 failed with error:\n%s\n', ME.message);

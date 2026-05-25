@@ -92,113 +92,116 @@ def make_strategy(K_soc):
     return strategy_fn
 
 
-# ── Charge-sustenance bisection loop ─────────────────────────────────────────
-TOLERANCE = 0.01
-K_soc = 200.0
-lo, hi = 50.0, 600.0
-best_result = None
-iteration = 0
+# ── Standalone analysis (bisection + plots) ───────────────────────────────────
+if __name__ == '__main__':
 
-print("Tuning K_soc for charge sustenance (|ΔSOC| < 0.01) ...")
-for iteration in range(25):
-    result = simulate_race(make_strategy(K_soc), SOC_0=SC_SOC_0, verbose=False)
-    delta_soc = result['delta_SOC']
-    print(f"  Iter {iteration + 1:2d}  K_soc={K_soc:.1f}  "
-          f"ΔSOC={delta_soc:+.4f}  H2={result['m_H2_total']:.3f} g")
+  # ── Charge-sustenance bisection loop ──────────────────────────────────────
+  TOLERANCE = 0.01
+  K_soc = 200.0
+  lo, hi = 50.0, 600.0
+  best_result = None
+  iteration = 0
 
-    if abs(delta_soc) <= TOLERANCE:
-        best_result = result
-        break
+  print("Tuning K_soc for charge sustenance (|ΔSOC| < 0.01) ...")
+  for iteration in range(25):
+      result = simulate_race(make_strategy(K_soc), SOC_0=SC_SOC_0, verbose=False)
+      delta_soc = result['delta_SOC']
+      print(f"  Iter {iteration + 1:2d}  K_soc={K_soc:.1f}  "
+            f"ΔSOC={delta_soc:+.4f}  H2={result['m_H2_total']:.3f} g")
 
-    # If SC net-discharges, FC must work harder → raise K_soc
-    if delta_soc < -TOLERANCE:
-        lo = K_soc
-    else:
-        hi = K_soc
-    K_soc = (lo + hi) / 2
-    best_result = result
+      if abs(delta_soc) <= TOLERANCE:
+          best_result = result
+          break
 
-if best_result is None:
-    best_result = result
+      # If SC net-discharges, FC must work harder → raise K_soc
+      if delta_soc < -TOLERANCE:
+          lo = K_soc
+      else:
+          hi = K_soc
+      K_soc = (lo + hi) / 2
+      best_result = result
 
-
-# ── Extract results ───────────────────────────────────────────────────────────
-t        = best_result['t']
-P_dem    = best_result['P_dem']
-P_fc     = best_result['P_fc']
-P_sc     = best_result['P_sc']
-SOC      = best_result['SOC']
-I_fc     = best_result['I_fc']
-m_H2_total = best_result['m_H2_total']
-delta_soc  = best_result['delta_SOC']
-lap_SOC    = best_result['lap_SOC']
-
-t_min       = t / 60.0
-cum_H2      = np.cumsum(K_H2 * I_fc * DT)
-
-mean_pfc  = float(np.mean(P_fc))
-mean_psc  = float(np.mean(P_sc))
-max_psc   = float(np.max(P_sc))
-min_lap   = float(np.min(lap_SOC[1:]))
-max_lap   = float(np.max(lap_SOC[1:]))
+  if best_result is None:
+      best_result = result
 
 
-# ── Figure ────────────────────────────────────────────────────────────────────
-fig, axes = plt.subplots(4, 1, figsize=(14, 11), sharex=True)
-fig.suptitle(
-    f"Strategy A — Heuristic Lookup Table  |  "
-    f"ΔSOC={delta_soc:+.4f}  |  "
-    f"H2={m_H2_total:.3f} g  |  "
-    f"K_soc={K_soc:.1f} W/SOC",
-    fontsize=11
-)
+  # ── Extract results ─────────────────────────────────────────────────────────
+  t        = best_result['t']
+  P_dem    = best_result['P_dem']
+  P_fc     = best_result['P_fc']
+  P_sc     = best_result['P_sc']
+  SOC      = best_result['SOC']
+  I_fc     = best_result['I_fc']
+  m_H2_total = best_result['m_H2_total']
+  delta_soc  = best_result['delta_SOC']
+  lap_SOC    = best_result['lap_SOC']
 
-ax0 = axes[0]
-ax0.plot(t_min, P_dem, color='black',  lw=0.6, label='P_dem')
-ax0.plot(t_min, P_fc,  color='steelblue',  lw=0.8, label='P_fc')
-ax0.plot(t_min, P_sc,  color='darkorange', lw=0.8, label='P_sc')
-ax0.set_ylabel('Power [W]')
-ax0.legend(loc='upper right', fontsize=8)
-ax0.grid(True, lw=0.3)
+  t_min       = t / 60.0
+  cum_H2      = np.cumsum(K_H2 * I_fc * DT)
 
-ax1 = axes[1]
-ax1.plot(t_min, SOC, color='green', lw=0.8)
-ax1.axhline(SC_SOC_0,   color='black',  lw=0.8, ls='--', label=f'SOC_0={SC_SOC_0}')
-ax1.axhline(SC_SOC_MIN, color='red',    lw=0.8, ls=':',  label=f'SOC_MIN={SC_SOC_MIN}')
-ax1.axhline(SC_SOC_MAX, color='purple', lw=0.8, ls=':',  label=f'SOC_MAX={SC_SOC_MAX}')
-ax1.set_ylabel('SC SOC [—]')
-ax1.legend(loc='upper right', fontsize=8)
-ax1.grid(True, lw=0.3)
-
-ax2 = axes[2]
-ax2.plot(t_min, I_fc, color='firebrick', lw=0.8)
-ax2.set_ylabel('I_fc [A]')
-ax2.grid(True, lw=0.3)
-
-ax3 = axes[3]
-ax3.plot(t_min, cum_H2, color='darkviolet', lw=0.8)
-ax3.set_ylabel('Cumulative H2 [g]')
-ax3.set_xlabel('Time [min]')
-ax3.grid(True, lw=0.3)
-
-fig.tight_layout(rect=[0, 0, 1, 0.96])
-out_path = os.path.join(RESULTS_DIR, 'strategy_a_lut_results.png')
-fig.savefig(out_path, dpi=150)
-plt.close(fig)
-print(f"\nFigure saved → {out_path}")
+  mean_pfc  = float(np.mean(P_fc))
+  mean_psc  = float(np.mean(P_sc))
+  max_psc   = float(np.max(P_sc))
+  min_lap   = float(np.min(lap_SOC[1:]))
+  max_lap   = float(np.max(lap_SOC[1:]))
 
 
-# ── Summary ───────────────────────────────────────────────────────────────────
-print()
-print("=== Strategy A: Heuristic Lookup Table ===")
-print(f"  Tuned K_soc       : {K_soc:.1f} W per unit SOC")
-print(f"  Final ΔSOC        : {delta_soc:+.4f}  (target |ΔSOC| < 0.01)")
-print(f"  Total H2 consumed : {m_H2_total:.3f} g")
-print(f"  Charge sustained  : {'YES' if abs(delta_soc) <= 0.01 else 'NO'}")
-print(f"  Convergence iters : {iteration + 1}")
-print(f"  Min lap SOC       : {min_lap:.3f}")
-print(f"  Max lap SOC       : {max_lap:.3f}")
-print(f"  Mean P_fc         : {mean_pfc:.1f} W")
-print(f"  Mean P_sc         : {mean_psc:.1f} W")
-print(f"  Peak SC discharge : {max_psc:.1f} W")
-print("==========================================")
+  # ── Figure ───────────────────────────────────────────────────────────────────
+  fig, axes = plt.subplots(4, 1, figsize=(14, 11), sharex=True)
+  fig.suptitle(
+      f"Strategy A — Heuristic Lookup Table  |  "
+      f"ΔSOC={delta_soc:+.4f}  |  "
+      f"H2={m_H2_total:.3f} g  |  "
+      f"K_soc={K_soc:.1f} W/SOC",
+      fontsize=11
+  )
+
+  ax0 = axes[0]
+  ax0.plot(t_min, P_dem, color='black',  lw=0.6, label='P_dem')
+  ax0.plot(t_min, P_fc,  color='steelblue',  lw=0.8, label='P_fc')
+  ax0.plot(t_min, P_sc,  color='darkorange', lw=0.8, label='P_sc')
+  ax0.set_ylabel('Power [W]')
+  ax0.legend(loc='upper right', fontsize=8)
+  ax0.grid(True, lw=0.3)
+
+  ax1 = axes[1]
+  ax1.plot(t_min, SOC, color='green', lw=0.8)
+  ax1.axhline(SC_SOC_0,   color='black',  lw=0.8, ls='--', label=f'SOC_0={SC_SOC_0}')
+  ax1.axhline(SC_SOC_MIN, color='red',    lw=0.8, ls=':',  label=f'SOC_MIN={SC_SOC_MIN}')
+  ax1.axhline(SC_SOC_MAX, color='purple', lw=0.8, ls=':',  label=f'SOC_MAX={SC_SOC_MAX}')
+  ax1.set_ylabel('SC SOC [—]')
+  ax1.legend(loc='upper right', fontsize=8)
+  ax1.grid(True, lw=0.3)
+
+  ax2 = axes[2]
+  ax2.plot(t_min, I_fc, color='firebrick', lw=0.8)
+  ax2.set_ylabel('I_fc [A]')
+  ax2.grid(True, lw=0.3)
+
+  ax3 = axes[3]
+  ax3.plot(t_min, cum_H2, color='darkviolet', lw=0.8)
+  ax3.set_ylabel('Cumulative H2 [g]')
+  ax3.set_xlabel('Time [min]')
+  ax3.grid(True, lw=0.3)
+
+  fig.tight_layout(rect=[0, 0, 1, 0.96])
+  out_path = os.path.join(RESULTS_DIR, 'strategy_a_lut_results.png')
+  fig.savefig(out_path, dpi=150)
+  plt.close(fig)
+  print(f"\nFigure saved → {out_path}")
+
+
+  # ── Summary ──────────────────────────────────────────────────────────────────
+  print()
+  print("=== Strategy A: Heuristic Lookup Table ===")
+  print(f"  Tuned K_soc       : {K_soc:.1f} W per unit SOC")
+  print(f"  Final ΔSOC        : {delta_soc:+.4f}  (target |ΔSOC| < 0.01)")
+  print(f"  Total H2 consumed : {m_H2_total:.3f} g")
+  print(f"  Charge sustained  : {'YES' if abs(delta_soc) <= 0.01 else 'NO'}")
+  print(f"  Convergence iters : {iteration + 1}")
+  print(f"  Min lap SOC       : {min_lap:.3f}")
+  print(f"  Max lap SOC       : {max_lap:.3f}")
+  print(f"  Mean P_fc         : {mean_pfc:.1f} W")
+  print(f"  Mean P_sc         : {mean_psc:.1f} W")
+  print(f"  Peak SC discharge : {max_psc:.1f} W")
+  print("==========================================")
