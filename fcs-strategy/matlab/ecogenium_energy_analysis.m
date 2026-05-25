@@ -33,9 +33,9 @@ wheel_radius = 0.275;
 gravity = 9.81;
 motor_gear_ratio = 5.6;
 drag_coefficient = 0.15;
-frontal_area = 0.4;
+frontal_area = 0.8;
 air_density = 1.225;
-rolling_resistance_coef = 0.0013;
+rolling_resistance_coef = 0.006;
 drivetrain_efficiency = 0.95; % Updated from 0.85 to realistic chain/hub efficiency
 motor_power_rated = 1200;
 motor_efficiency = 0.96;
@@ -70,7 +70,7 @@ rolling_force = rolling_resistance_coef * vehicle_mass * gravity * ones(size(vel
 inertial_force = vehicle_mass * acceleration_smooth;
 
 % NEW: Calculate Gradient Force using the merged incline data
-gradient_force = -vehicle_mass * gravity * sin(deg2rad(data.inc_angle_deg));
+gradient_force = vehicle_mass * gravity * sin(deg2rad(data.inc_angle_deg));
 
 % Total Force
 tractive_force = drag_force + rolling_force + inertial_force + gradient_force;

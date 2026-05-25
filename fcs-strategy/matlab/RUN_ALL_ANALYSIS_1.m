@@ -81,7 +81,7 @@ fprintf('=======================================================================
 pause(1);
 
 try
-    run('ecogenium_energy_analysis.m');
+    run('ecogenium_energy_analysis_1.m');
     fprintf('\n✓ Module 3 completed successfully\n\n');
 catch ME
     fprintf('\n✗ Module 3 failed: %s\n\n', ME.message);
