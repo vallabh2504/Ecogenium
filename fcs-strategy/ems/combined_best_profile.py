@@ -121,6 +121,15 @@ def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.):
         vs[ms:me]=np.clip(vs[ms:me],0.,V_MAX)
     return ta,vs,Pa,sa,la,ea,ga,ca
 
+def road_load_power(va, ga):
+    """Physics-based road-load electrical power [W] from velocity & grade arrays.
+    This is the power needed to maintain constant speed — positive means propulsion needed."""
+    F_drag  = 0.5*CD*AF*RHO*va**2
+    F_roll  = CRR*MASS*G
+    F_grade = MASS*G*ga
+    P_mech  = (F_drag + F_roll + F_grade)*va
+    return np.maximum(0., P_mech)/ETA_DT
+
 def verify(t,v,la,silent=True):
     d=float(np.trapezoid(v,t))/1000.; dur=float(t[-1])/60.
     stops=len(np.where(np.diff((v==0.).astype(int))==1)[0])
@@ -454,83 +463,98 @@ ax2.set_title(
     fontsize=10,fontweight='bold',pad=10)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Panel 3 — Power breakdown with FC efficiency colour coding (Lap 1)
+# Panel 3 — Physics-based road load + FC efficiency (Lap 1)
 # ══════════════════════════════════════════════════════════════════════════════
 ax3=fig.add_subplot(gs[2])
 
-# Shade SC discharge vs charge
-Psc1 = best['Psc'][m1]
-ax3.fill_between(t1, Psc1, 0, where=(Psc1>0), color='#0072B2', alpha=0.20, label='SC discharge')
-ax3.fill_between(t1, Psc1, 0, where=(Psc1<0), color='#CC79A7', alpha=0.20, label='SC charge')
+# Road-load power computed from actual v(t) and grade(t) — this is what
+# vehicle dynamics truly demand to maintain current speed at each instant.
+va1   = best['va'][m1]          # velocity [m/s]
+ga1   = best['ga'][m1]          # grade [-]
+P_rl1 = road_load_power(va1, ga1)   # physics-based [W electrical]
+Psc1  = best['Psc'][m1]
 
-# Total demand as dashed black
-ax3.plot(t1, P1, color='#222222', lw=1.4, ls='--', alpha=0.8, label='Total demand $P_d$')
+# Road-load power (smooth, velocity-dependent) — the physical truth
+ax3.fill_between(t1, P_rl1, 0, alpha=0.18, color='#222222', label='Road-load demand $P_{rl}(v,g)$')
+ax3.plot(t1, P_rl1, color='#222222', lw=1.2, alpha=0.75)
 
-# FC power coloured segment-by-segment by efficiency (red→green)
+# Commanded motor electrical power (what EMS actually receives as demand)
+ax3.plot(t1, P1, color='#888888', lw=1.0, ls='--', alpha=0.7, label='Commanded motor $P_d$ (P&G)')
+
+# SC discharge (+) / charge (−) shading
+ax3.fill_between(t1, Psc1, 0, where=(Psc1>0), color='#0072B2', alpha=0.22, label='SC discharge')
+ax3.fill_between(t1, Psc1, 0, where=(Psc1<0), color='#CC79A7', alpha=0.22, label='SC charge (FC surplus)')
+
+# FC power colour-coded by efficiency (red=low η → green=peak η)
 for i in range(len(t1)-1):
     c = eta_color(Pfc1[i])
-    ax3.plot(t1[i:i+2], Pfc1[i:i+2], color=c, lw=2.2)
+    ax3.plot(t1[i:i+2], Pfc1[i:i+2], color=c, lw=2.4)
 
-# Colourbar for efficiency
+# Colourbar
 sm=mcm.ScalarMappable(cmap=_cmap_rg,norm=_norm_eta)
 sm.set_array([])
 cbar=fig.colorbar(sm,ax=ax3,orientation='vertical',fraction=0.018,pad=0.01)
 cbar.set_label('FC efficiency η [—]',fontsize=9)
 cbar.ax.tick_params(labelsize=8)
 
-ax3.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls=':',alpha=0.7)
-ax3.axhline(FC_P_MAX,color='#D62728',lw=0.8,ls=':',alpha=0.5)
+ax3.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls=':',alpha=0.7,label=f'FC_MIN={FC_P_MIN:.0f}W')
+ax3.axhline(0,color='#333333',lw=0.6,ls='-',alpha=0.3)
 ax3.set_xlabel('Time in lap [s]',fontsize=10)
 ax3.set_ylabel('Power [W]',fontsize=10)
 ax3.set_title(
-    'Power Breakdown — Lap 1  |  FC power colour-coded by efficiency (red=low → green=peak)',
+    'Power Breakdown — Lap 1  |  Road-load $P_{rl}(v,g)$ (physics) vs commanded $P_d$ (P&G)  '
+    '|  FC colour = efficiency',
     fontsize=10,fontweight='bold')
-ax3.legend(fontsize=8.5,loc='upper right',framealpha=0.9)
+ax3.legend(fontsize=8,loc='upper right',framealpha=0.9,ncol=2)
 ax3.set_xlim(t1[0],t1[-1])
 ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
 
-# Annotate eta range
 eta1=fc_eta_arr(Pfc1); eta_on=eta1[Pfc1>=FC_P_MIN]
 if len(eta_on):
-    ax3.annotate(f"η: {eta_on.min()*100:.1f}–{eta_on.max()*100:.1f}%",
+    ax3.annotate(f"FC η: {eta_on.min()*100:.1f}–{eta_on.max()*100:.1f}%",
                  xy=(0.02,0.93),xycoords='axes fraction',fontsize=9,
                  color='#333333',fontweight='bold')
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Panel 4 — Motor power full race (all 11 laps)
+# Panel 4 — Full-race motor power (road-load) with FC overlay, all 11 laps
 # ══════════════════════════════════════════════════════════════════════════════
 ax4=fig.add_subplot(gs[3])
 
-ta_min = best['ta']/60.
-Pa_b   = best['Pa']; ca_b_=best['ca']
-ax4.fill_between(ta_min, Pa_b, 0, where=(~ca_b_), color='#EE7733', alpha=0.6, label='Motor on')
-ax4.fill_between(ta_min, Pa_b, 0, where=ca_b_,   color='#9467BD', alpha=0.45,label='Coast/stop')
+ta_min  = best['ta']/60.
+ca_b_   = best['ca']
+P_rl_all = road_load_power(best['va'], best['ga'])   # physics, full race
 
-# Lap boundary markers
-lap_starts=[]
+ax4.fill_between(ta_min, P_rl_all, 0, color='#222222', alpha=0.15, label='Road-load $P_{rl}(v,g)$')
+ax4.plot(ta_min, P_rl_all, color='#333333', lw=0.9, alpha=0.6)
+
+# Commanded motor power (P&G square wave)
+ax4.fill_between(ta_min, best['Pa'], 0, where=(~ca_b_), color='#EE7733', alpha=0.45, label='Motor cmd $P_d$ (on)')
+ax4.fill_between(ta_min, best['Pa'], 0, where=ca_b_,   color='#9467BD', alpha=0.35, label='Coast/stop')
+
+# FC power (Strategy G)
+ax4.plot(ta_min, best['Pfc'], color='#D55E00', lw=0.9, alpha=0.85, label='FC output (Strat G)')
+
+# Lap markers
 for lap in range(1,N_LAPS+1):
     idx=np.where(best['la']==lap)[0][0]
-    lap_starts.append(best['ta'][idx]/60.)
-for i,lt in enumerate(lap_starts):
-    ax4.axvline(lt,color='#444444',lw=0.7,ls=':',alpha=0.5)
-    ax4.text(lt+0.1,max(Pa_b)*1.01,f'L{i+1}',fontsize=7,color='#444444',va='bottom')
-
-# FC power overlay (Strategy G)
-ax4.plot(ta_min, best['Pfc'], color='#D55E00', lw=1.0, alpha=0.8, label='FC power (Strat G)')
+    lt=best['ta'][idx]/60.
+    ax4.axvline(lt,color='#444444',lw=0.6,ls=':',alpha=0.4)
+    ax4.text(lt+0.05,max(P_rl_all)*1.02,f'L{lap}',fontsize=7,color='#555555',va='bottom')
 
 ax4.set_xlabel('Race time [min]',fontsize=10)
 ax4.set_ylabel('Power [W]',fontsize=10)
 ax4.set_title(
-    f'Motor Power & FC Output — Full Race ({best["ta"][-1]/60.:.1f} min, 11 laps)',
+    f'Full-Race Power — Road-load (physics) vs Motor command (P&G) vs FC output  '
+    f'({best["ta"][-1]/60.:.1f} min, 11 laps)',
     fontsize=10,fontweight='bold')
-ax4.legend(fontsize=8.5,loc='upper right',framealpha=0.9)
+ax4.legend(fontsize=8.5,loc='upper right',framealpha=0.9,ncol=2)
 ax4.set_xlim(0,best['ta'][-1]/60.)
 ax4.spines['top'].set_visible(False); ax4.spines['right'].set_visible(False)
 
 fig.suptitle(
     f'Hydraix I SEM 2026 — Best Velocity Profile  |  '
     f'km/m³={best["km3"]:.1f}  H₂={best["H2"]:.3f}g  ΔSOC={best["dSOC"]:+.4f}  '
-    f'Race: {best["ta"][-1]/60.:.1f} min  |  Natural coast → hard brake @ 4 km/h',
+    f'Race: {best["ta"][-1]/60.:.1f} min  |  Natural coast → hard brake @ 5 km/h',
     fontsize=12,fontweight='bold',y=0.995)
 
 out=os.path.join(RESULTS_DIR,'combined_best_result.png')
