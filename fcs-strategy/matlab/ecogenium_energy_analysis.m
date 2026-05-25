@@ -70,7 +70,7 @@ rolling_force = rolling_resistance_coef * vehicle_mass * gravity * ones(size(vel
 inertial_force = vehicle_mass * acceleration_smooth;
 
 % NEW: Calculate Gradient Force using the merged incline data
-gradient_force = -vehicle_mass * gravity * sin(deg2rad(data.inc_angle_deg));
+gradient_force = vehicle_mass * gravity * sin(deg2rad(data.inc_angle_deg));
 
 % Total Force
 tractive_force = drag_force + rolling_force + inertial_force + gradient_force;

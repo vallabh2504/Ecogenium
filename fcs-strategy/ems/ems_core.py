@@ -196,7 +196,7 @@ LHV_H2     = 120_000.0                                    # J/g
 _I_ref     = float(fc_current(np.array([FC_P_MAX]))[0])
 _mh2_ref   = float(fc_h2_rate(np.array([_I_ref]))[0])     # g/s
 ETA_FC_REF = FC_P_MAX / (_mh2_ref * LHV_H2)               # ≈ 0.415
-ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 49 800 W/(g/s)
+ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 50 000 W/(g/s)
 
 
 # ── Supercapacitor model ───────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 49 800 W/(g/s)
 SC_C       = 87.0     # F  (Maxwell BMOD0058 E016 C02: 3P × 2S → 3×58F/2 = 87F)
 SC_V_MAX   = 32.0     # V  (2 × 16 V rated)
 SC_V_MIN   = 16.0     # V  (minimum usable: 75 % energy retained above here)
-SC_ESR     = 0.015    # Ω  (3-parallel ESR reduction from 44 mΩ per pair)
+SC_ESR     = 0.029    # Ω  (2S × 44mΩ/3-parallel = 2 × 14.7 mΩ ≈ 29 mΩ)
 SC_ETA     = 0.95     # round-trip efficiency (converter + SC losses)
 SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # 33 408 J = 9.28 Wh
 
