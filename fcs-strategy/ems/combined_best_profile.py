@@ -18,6 +18,7 @@ from ems_core import (
     FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
     SC_E_J, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
     K_H2, fc_current, fc_h2_rate, sc_soc_update,
+    motor_eta,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
 
@@ -121,14 +122,20 @@ def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.):
         vs[ms:me]=np.clip(vs[ms:me],0.,V_MAX)
     return ta,vs,Pa,sa,la,ea,ga,ca
 
-def road_load_power(va, ga):
-    """Physics-based road-load electrical power [W] from velocity & grade arrays.
-    This is the power needed to maintain constant speed — positive means propulsion needed."""
-    F_drag  = 0.5*CD*AF*RHO*va**2
-    F_roll  = CRR*MASS*G
-    F_grade = MASS*G*ga
-    P_mech  = (F_drag + F_roll + F_grade)*va
-    return np.maximum(0., P_mech)/ETA_DT
+def physics_power_demand(va, ga):
+    """Electrical power demand [W] from vehicle dynamics — same model as run_power_plot.py.
+    Includes rolling + aero + acceleration + gradient, drivetrain efficiency, and
+    BAFANG motor efficiency lookup. Applied to the P&G velocity profile."""
+    accel      = np.gradient(va, DT)
+    P_rolling  = CRR * MASS * G * va
+    P_aero     = 0.5 * CD * AF * RHO * va**3
+    P_accel    = MASS * accel * va
+    P_gradient = MASS * G * ga * va          # grade ≈ sin(angle) for small angles
+    P_wheel    = P_rolling + P_aero + P_accel + P_gradient
+    P_motor    = np.where(P_wheel > 0, P_wheel / ETA_DT, 0.)
+    eta_m      = motor_eta(P_motor)
+    P_elec     = np.where(P_motor > 0, P_motor / eta_m, 0.)
+    return np.clip(np.where(np.isfinite(P_elec), P_elec, 0.), 0., None)
 
 def verify(t,v,la,silent=True):
     d=float(np.trapezoid(v,t))/1000.; dur=float(t[-1])/60.
@@ -471,15 +478,16 @@ ax3=fig.add_subplot(gs[2])
 # vehicle dynamics truly demand to maintain current speed at each instant.
 va1   = best['va'][m1]          # velocity [m/s]
 ga1   = best['ga'][m1]          # grade [-]
-P_rl1 = road_load_power(va1, ga1)   # physics-based [W electrical]
+P_rl1 = physics_power_demand(va1, ga1)   # physics-based [W electrical]
 Psc1  = best['Psc'][m1]
 
 # Road-load power (smooth, velocity-dependent) — the physical truth
-ax3.fill_between(t1, P_rl1, 0, alpha=0.18, color='#222222', label='Road-load demand $P_{rl}(v,g)$')
-ax3.plot(t1, P_rl1, color='#222222', lw=1.2, alpha=0.75)
+ax3.fill_between(t1, P_rl1, 0, alpha=0.18, color='#222222',
+                 label='Vehicle dynamics $P_{elec}(v,a,g)$\n(rolling+aero+accel+grad+motor η)')
+ax3.plot(t1, P_rl1, color='#222222', lw=1.3, alpha=0.8)
 
-# Commanded motor electrical power (what EMS actually receives as demand)
-ax3.plot(t1, P1, color='#888888', lw=1.0, ls='--', alpha=0.7, label='Commanded motor $P_d$ (P&G)')
+# Commanded motor electrical power (P&G step — what EMS actually sees as demand)
+ax3.plot(t1, P1, color='#888888', lw=1.0, ls='--', alpha=0.7, label='Commanded $P_d$ (P&G step)')
 
 # SC discharge (+) / charge (−) shading
 ax3.fill_between(t1, Psc1, 0, where=(Psc1>0), color='#0072B2', alpha=0.22, label='SC discharge')
@@ -502,9 +510,9 @@ ax3.axhline(0,color='#333333',lw=0.6,ls='-',alpha=0.3)
 ax3.set_xlabel('Time in lap [s]',fontsize=10)
 ax3.set_ylabel('Power [W]',fontsize=10)
 ax3.set_title(
-    'Power Breakdown — Lap 1  |  Road-load $P_{rl}(v,g)$ (physics) vs commanded $P_d$ (P&G)  '
-    '|  FC colour = efficiency',
-    fontsize=10,fontweight='bold')
+    'Power Breakdown — Lap 1  |  Vehicle-dynamics $P_{elec}(v,a,g)$ (rolling+aero+accel+grad+motor η) '
+    'vs commanded $P_d$ (P&G)  |  FC colour = efficiency',
+    fontsize=9,fontweight='bold')
 ax3.legend(fontsize=8,loc='upper right',framealpha=0.9,ncol=2)
 ax3.set_xlim(t1[0],t1[-1])
 ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
@@ -522,9 +530,10 @@ ax4=fig.add_subplot(gs[3])
 
 ta_min  = best['ta']/60.
 ca_b_   = best['ca']
-P_rl_all = road_load_power(best['va'], best['ga'])   # physics, full race
+P_rl_all = physics_power_demand(best['va'], best['ga'])   # physics, full race
 
-ax4.fill_between(ta_min, P_rl_all, 0, color='#222222', alpha=0.15, label='Road-load $P_{rl}(v,g)$')
+ax4.fill_between(ta_min, P_rl_all, 0, color='#222222', alpha=0.15,
+                 label='Vehicle dynamics $P_{elec}(v,a,g)$')
 ax4.plot(ta_min, P_rl_all, color='#333333', lw=0.9, alpha=0.6)
 
 # Commanded motor power (P&G square wave)
