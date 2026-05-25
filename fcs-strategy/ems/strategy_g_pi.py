@@ -242,8 +242,15 @@ print(f"  Pure LPF (K_p=0, K_i=0): ΔSOC={delta_soc_phase1:+.4f}  H2={m_H2_phase
 
 # ── Phase 2: Bisect K_p for charge sustenance ─────────────────────────────────
 # K_i is fixed at K_I_FIXED = 2.0 W/(SOC·s)
-# Direction: ΔSOC < -TOLERANCE → under-producing → raise K_p (lo = K_p)
-#            ΔSOC > +TOLERANCE → over-producing  → lower K_p (hi = K_p)
+#
+# With K_i=2.0 and the lap supervisor, the integral action already pushes SOC
+# slightly above target (ΔSOC > 0 even at K_p=0). When SOC > SC_SOC_0, the
+# proportional error soc_err = SC_SOC_0 − SOC < 0, so K_p · soc_err < 0 —
+# increasing K_p REDUCES net FC output, bringing ΔSOC back toward zero.
+#
+# Bisection direction (opposite to pure-feedforward case):
+#   ΔSOC > +TOLERANCE → SOC drifting high → raise K_p (lo = K_p)
+#   ΔSOC < -TOLERANCE → SOC drifting low  → lower K_p (hi = K_p)
 
 print("\nPhase 2: Bisecting K_p for charge sustenance (|ΔSOC| < 0.01) ...")
 TOLERANCE    = 0.01
@@ -263,10 +270,10 @@ for iteration in range(25):
         best_result = result
         break
 
-    if delta_soc < -TOLERANCE:
-        lo = K_p   # net discharge → under-producing → raise K_p
+    if delta_soc > TOLERANCE:
+        lo = K_p   # SOC drifting high → raise K_p to reduce net FC output
     else:
-        hi = K_p   # net charge → over-producing → lower K_p
+        hi = K_p   # SOC drifting low  → lower K_p to increase net FC output
     K_p = (lo + hi) / 2.0
     best_result = result
 
