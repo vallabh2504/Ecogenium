@@ -31,47 +31,43 @@ TOLERANCE   = 0.01    # |ΔSOC| target
 
 
 # ── Strategy factory ──────────────────────────────────────────────────────────
-def make_strategy(K_p, K_i=2.0, tau=15.0, T_LAP=None):
+def make_strategy(K_p, K_i=2.0, tau=15.0, T_LAP=None, soc_glide_off=SC_SOC_0):
     """
     Feedforward + SOC-PI (Strategy G).
-    T_LAP: lap duration [s] used by lap supervisor (None → use canonical T_LAP).
+
+    T_LAP         : lap duration [s] for lap supervisor (None → canonical).
+    soc_glide_off : SOC threshold above which FC is suppressed during glide
+                    (P_dem < 25 W).  SC_SOC_0 (default) lets the FC trickle-
+                    charge the SC whenever SOC is below target, which is
+                    required for charge sustenance on P&G drive cycles.
     """
     alpha = np.exp(-DT / tau)
-
-    # T_LAP is captured per-call so each bisection iteration gets a fresh closure.
-    # We resolve T_LAP_canonical lazily inside the factory so multiple calls to
-    # make_strategy() don't all re-run build_demand_profile().
-    _T = T_LAP  # may be None; resolved below after canonical profile is built
+    _T    = T_LAP
 
     state = {
         'P_filt':       None,
         'integrator':   0.0,
         'P_lap_offset': 0.0,
         'prev_lap_idx': -1,
-        'T_lap_eff':    _T,   # filled in on first lap-boundary call if None
+        'T_lap_eff':    _T,
     }
 
     def strategy_fn(P_dem, SOC, P_fc_prev, t_in_lap, lap_idx):
-        # Initialise filter on first call
         if state['P_filt'] is None:
             state['P_filt'] = P_dem
 
-        # Resolve T_lap_eff once if not provided (use canonical duration)
         if state['T_lap_eff'] is None:
             state['T_lap_eff'] = _T_LAP_CANONICAL
 
-        # Lap boundary: update lap supervisor
         if lap_idx != state['prev_lap_idx'] and lap_idx > 0:
             E_deficit = (SC_SOC_0 - SOC) * SC_E_J
             state['P_lap_offset'] += K_LAP * E_deficit / state['T_lap_eff']
             state['P_lap_offset'] = float(np.clip(state['P_lap_offset'], -200.0, 200.0))
         state['prev_lap_idx'] = lap_idx
 
-        # 1st-order IIR low-pass filter (feedforward)
         state['P_filt'] = alpha * state['P_filt'] + (1.0 - alpha) * P_dem
         P_filt = state['P_filt']
 
-        # SOC-PI controller
         soc_err = SC_SOC_0 - SOC
         state['integrator'] += soc_err * DT
         if K_i > 1e-9:
@@ -79,10 +75,13 @@ def make_strategy(K_p, K_i=2.0, tau=15.0, T_LAP=None):
                 state['integrator'], -150.0 / K_i, +150.0 / K_i))
         P_pi = K_p * soc_err + K_i * state['integrator']
 
-        # Combined command
         P_cmd = P_filt + P_pi + state['P_lap_offset']
-        if P_dem < 25.0 and SOC >= SC_SOC_0 - 0.05:
-            P_cmd = 0.0   # true glide: FC off
+
+        # FC suppressed during glide only when SC is at/above target SOC.
+        # Allows trickle-charging during glide phases when SOC < SC_SOC_0,
+        # which is essential for charge sustenance on P&G drive cycles.
+        if P_dem < 25.0 and SOC >= soc_glide_off:
+            P_cmd = 0.0
 
         P_fc = float(np.clip(P_cmd, 0.0, FC_P_MAX))
         return (P_fc, P_filt)
@@ -236,14 +235,15 @@ def simulate_custom(strategy_fn, t_all, P_dem, lap_idx_arr, SOC_0=SC_SOC_0):
 
 
 # ── Bisect K_p for charge sustenance ─────────────────────────────────────────
-def bisect_kp(sim_fn, label, T_LAP_override=None):
+def bisect_kp(sim_fn, label, T_LAP_override=None, soc_glide_off=SC_SOC_0):
     print(f"\n── Bisecting K_p for '{label}' (|ΔSOC| < {TOLERANCE}) ──────────")
     lo, hi = 0.0, 3000.0
     K_p    = 800.0
     best   = None
 
     for i in range(25):
-        strat  = make_strategy(K_p=K_p, K_i=K_I_FIXED, tau=TAU, T_LAP=T_LAP_override)
+        strat  = make_strategy(K_p=K_p, K_i=K_I_FIXED, tau=TAU,
+                               T_LAP=T_LAP_override, soc_glide_off=soc_glide_off)
         result = sim_fn(strat)
         d      = result['delta_SOC']
         print(f"  iter {i+1:2d}  K_p={K_p:7.1f}  ΔSOC={d:+.4f}  H2={result['m_H2_total']:.3f} g")
@@ -290,17 +290,26 @@ globals()['_T_LAP_CANONICAL'] = _T_LAP_CANONICAL
 print(f"  Canonical T_lap = {_T_LAP_CANONICAL:.1f} s")
 
 # ── Run: Canonical ────────────────────────────────────────────────────────────
+# soc_glide_off = SC_SOC_0: FC suppressed during glide only when SOC ≥ target.
+# For the constant-speed GPS profile this has no practical effect because
+# P_dem never drops below 25 W — all driving power is in the aerodynamic range.
 kp_can, res_can = bisect_kp(
     lambda strat: simulate_canonical(strat),
     'Canonical GPS',
     T_LAP_override=None,
+    soc_glide_off=SC_SOC_0,
 )
 
-# ── Run: Elevation-aware ──────────────────────────────────────────────────────
+# ── Run: Elevation-aware P&G ──────────────────────────────────────────────────
+# soc_glide_off = SC_SOC_0: during the 79% of race time when the motor is off
+# (P_dem = 0), the FC is allowed to trickle-charge the SC whenever SOC < 0.60.
+# Without this fix the FC is suppressed for nearly the entire race and the
+# SOC drifts to –0.049 regardless of K_p.
 kp_elev, res_elev = bisect_kp(
     lambda strat: simulate_custom(strat, t_elev, P_elev, lap_elev),
-    'Elev-aware P&G',
+    'Elev-aware P&G (tuned)',
     T_LAP_override=T_LAP_ELEV,
+    soc_glide_off=SC_SOC_0,
 )
 
 # ── Derived metrics ───────────────────────────────────────────────────────────
@@ -351,9 +360,9 @@ axes = [fig.add_subplot(gs[i]) for i in range(5)]
 ax_tab = fig.add_subplot(gs[5])
 
 fig.suptitle(
-    "Strategy G — Feedforward + SOC-PI\n"
+    "Strategy G (tuned) — Feedforward + SOC-PI  |  glide-off threshold = SC_SOC_0\n"
     "Canonical GPS profile  vs  Elevation-aware Pulse-and-Glide profile",
-    fontsize=13, fontweight='bold',
+    fontsize=12, fontweight='bold',
 )
 
 def _lap_vlines(ax, lap_times, color='grey'):
