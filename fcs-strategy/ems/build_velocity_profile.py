@@ -51,13 +51,14 @@ V_MAX   = 10.0    # m/s  (36 km/h) — absolute speed cap
 V_MIN   = 5.0     # m/s  (18 km/h) — minimum acceptable speed
 P_PULSE = 900.0   # W   motor electrical power during flat pulse
 P_BOOST = 1100.0  # W   motor electrical power on uphill
-A_BRAKE = 2.0     # m/s²  braking deceleration
+A_STOP  = 0.5     # m/s²  gentle coast-to-stop (rolling + aero + light retardation)
+GRADE_THRESH = 0.006  # 0.6%  — only real hills trigger special modes
+P_RAMP_MAX   = 200.0  # W/step — motor power ramp limit per DT
 
 # ── Tuned operating point ──────────────────────────────────────────────────────
-# With the elevation-aware terrain (82% of route is graded), uphill always
-# pulses and downhill coasts.  To land in 34–35 min with dist > 14.5 km,
-# V_HIGH is tuned to 8.0 m/s (28.8 km/h) → 34.5 min / 14.52 km.
-V_HIGH = 8.0      # effective glide-trigger (overrides nominal 8.33)
+# With A_STOP=0.5 m/s² the lap-end stop takes ~12-15 s (vs 3 s before),
+# adding ~1.5-2 min total.  V_HIGH raised to 8.5 m/s to compensate.
+V_HIGH = 8.2      # effective glide-trigger (29.5 km/h)
 
 N_STOP_STEPS = round(4.0 / DT)   # 4-second stop at lap line = 20 steps
 
@@ -159,6 +160,7 @@ def _build_one_lap():
     s = 0.0
     mode = 'PULSE'   # start in pulse to accelerate from stop
     first_step = True  # skip recording the initial v=0 state (overlaps prev lap's stop)
+    prev_P_elec = 0.0  # for power ramping
 
     MAX_LAP_TIME = 600.0  # safety cap
 
@@ -171,15 +173,15 @@ def _build_one_lap():
 
         # ── Brake check: do we need to start braking to stop at lap end? ──────
         remaining = D_LAP - s_wrap
-        brake_dist = v**2 / (2.0 * A_BRAKE) + v * DT
+        brake_dist = v**2 / (2.0 * A_STOP) + v * DT
 
-        if v > 0 and remaining <= brake_dist and remaining > 0:
+        if v > 0 and remaining <= brake_dist and remaining > 0 and mode != 'BRAKE':
             mode = 'BRAKE'
 
         # ── Determine P_elec for THIS step based on mode and grade ────────────
         if mode == 'BRAKE':
             P_elec = 0.0
-        elif grade < -0.002:
+        elif grade < -GRADE_THRESH:
             # Downhill: motor OFF, let gravity assist; cap at V_MAX
             if v < V_LOW and grade > -0.005:
                 # Flattening after downhill, below V_LOW — resume pulse
@@ -187,7 +189,7 @@ def _build_one_lap():
                 mode = 'PULSE'
             else:
                 P_elec = 0.0
-        elif grade > +0.002:
+        elif grade > +GRADE_THRESH:
             # Uphill: always boost until V_HIGH, then glide if > V_HIGH
             # (entering uphill mid-glide: force pulse to maintain speed on hill)
             if v >= V_HIGH:
@@ -213,6 +215,12 @@ def _build_one_lap():
                 else:
                     P_elec = P_PULSE
 
+        # Ramp power: limit step change to P_RAMP_MAX W per timestep
+        P_elec = float(np.clip(P_elec,
+                                prev_P_elec - P_RAMP_MAX,
+                                prev_P_elec + P_RAMP_MAX))
+        prev_P_elec = P_elec
+
         # Record state for this timestep BEFORE updating velocity
         # (skip the very first step: initial v=0 would extend the prev lap's stop)
         if not first_step:
@@ -226,8 +234,9 @@ def _build_one_lap():
 
         # ── Advance state ─────────────────────────────────────────────────────
         if mode == 'BRAKE':
-            # Constant deceleration braking (forward-Euler: s advances with current v)
-            v_new = max(0.0, v - A_BRAKE * DT)
+            # Gentle coast-to-stop (forward-Euler: s advances with current v)
+            P_elec = 0.0
+            v_new = max(0.0, v - A_STOP * DT)
             s_new = s + v * DT
         else:
             # Physics-based forward Euler
@@ -236,7 +245,7 @@ def _build_one_lap():
             v_new = max(0.0, v + a * DT)
 
             # Speed cap
-            if grade < -0.002:
+            if grade < -GRADE_THRESH:
                 v_upper = min(V_MAX, V_HIGH + 3.0)
                 v_new = min(v_new, v_upper)
             else:
@@ -320,6 +329,21 @@ def build_full_profile():
     elev_arr    = np.concatenate(all_elev)
     grade_arr   = np.concatenate(all_grade)
 
+    # Smooth velocity while preserving v=0 stop segments
+    from scipy.signal import savgol_filter as _sgf
+    v_smooth = v_arr.copy()
+    # Find non-zero segments and smooth them individually
+    in_motion = (v_arr > 0.0)
+    # Find start/end indices of each contiguous motion segment
+    motion_starts = np.where(np.diff(np.concatenate([[0], in_motion.astype(int)])) == 1)[0]
+    motion_ends   = np.where(np.diff(np.concatenate([in_motion.astype(int), [0]])) == -1)[0] + 1
+    for ms, me in zip(motion_starts, motion_ends):
+        seg = v_arr[ms:me]
+        if len(seg) > 25:   # only smooth if segment is long enough
+            v_smooth[ms:me] = _sgf(seg, window_length=21, polyorder=2)
+        v_smooth[ms:me] = np.clip(v_smooth[ms:me], 0.0, V_MAX)
+    v_arr = v_smooth
+
     return t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr
 
 
@@ -388,9 +412,9 @@ def _get_lap1_mask(lap_num_arr):
 
 def _color_by_grade(grade, v_or_empty=None, mode_arr=None):
     """Return colour string based on grade."""
-    if grade < -0.002:
+    if grade < -GRADE_THRESH:
         return 'blue'
-    elif grade > +0.002:
+    elif grade > +GRADE_THRESH:
         return 'red'
     else:
         return 'grey'
@@ -431,9 +455,9 @@ def _make_figure(t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr):
     # Colour segments
     for i in range(len(s_route) - 1):
         g = g_route[i]
-        if g < -0.002:
+        if g < -GRADE_THRESH:
             c = 'steelblue'
-        elif g > +0.002:
+        elif g > +GRADE_THRESH:
             c = 'tomato'
         else:
             c = 'lightgrey'
@@ -474,9 +498,9 @@ def _make_figure(t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr):
     # Determine segment colour: uphill=red, downhill=blue, brake=black,
     # flat-pulse=orange, flat-glide=green
     def _seg_color_v_dist(i):
-        if g1[i] < -0.002:
+        if g1[i] < -GRADE_THRESH:
             return 'steelblue'
-        elif g1[i] > +0.002:
+        elif g1[i] > +GRADE_THRESH:
             return 'tomato'
         elif v1[i] == 0.0:
             return 'black'
@@ -512,13 +536,13 @@ def _make_figure(t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr):
              label='Grade (%)')
     ax3.axhline(0, color='black', linewidth=0.5)
     ax3.fill_between(_s_raw,
-                     np.where(_grad_smooth > 0.002, _grad_smooth * 100.0, 0.0),
+                     np.where(_grad_smooth > GRADE_THRESH, _grad_smooth * 100.0, 0.0),
                      0.0,
-                     color='tomato', alpha=0.4, label='Uphill (grade > 0.2%)')
+                     color='tomato', alpha=0.4, label=f'Uphill (grade > {GRADE_THRESH*100:.1f}%)')
     ax3.fill_between(_s_raw,
-                     np.where(_grad_smooth < -0.002, _grad_smooth * 100.0, 0.0),
+                     np.where(_grad_smooth < -GRADE_THRESH, _grad_smooth * 100.0, 0.0),
                      0.0,
-                     color='steelblue', alpha=0.4, label='Downhill (grade < -0.2%)')
+                     color='steelblue', alpha=0.4, label=f'Downhill (grade < -{GRADE_THRESH*100:.1f}%)')
     ax3.set_xlabel('Distance in lap [m]', fontsize=9)
     ax3.set_ylabel('Grade [%]', fontsize=9)
     ax3.set_title('Grade Profile — Silesia Ring (1 lap)', fontsize=9, fontweight='bold')
