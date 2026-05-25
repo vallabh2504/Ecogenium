@@ -39,7 +39,7 @@ ETA_DT  = 0.95
 DT      = 0.2       # s  (5 Hz)
 
 FC_P_MAX_W = 1013.0   # W  FC max power
-MOT_MAX_W  = 1200.0   # W  motor max electrical input
+MOT_MAX_W  = 1000.0   # W  motor rated electrical input (BAFANG RM G060.1000)
 
 # ── Race parameters ────────────────────────────────────────────────────────────
 N_LAPS  = 11
@@ -49,8 +49,8 @@ V_HIGH  = 8.33    # m/s  (30 km/h) — glide trigger (flat), tuned to 8.0 below
 V_LOW   = 5.83    # m/s  (21 km/h) — pulse trigger (flat)
 V_MAX   = 10.0    # m/s  (36 km/h) — absolute speed cap
 V_MIN   = 5.0     # m/s  (18 km/h) — minimum acceptable speed
-P_PULSE = 900.0   # W   motor electrical power during flat pulse
-P_BOOST = 1100.0  # W   motor electrical power on uphill
+P_PULSE = 1000.0  # W   motor electrical power during flat pulse (rated input)
+P_BOOST = 1000.0  # W   motor electrical power on uphill (rated input)
 A_STOP  = 0.5     # m/s²  gentle coast-to-stop (rolling + aero + light retardation)
 GRADE_THRESH = 0.006  # 0.6%  — only real hills trigger special modes
 P_RAMP_MAX   = 200.0  # W/step — motor power ramp limit per DT

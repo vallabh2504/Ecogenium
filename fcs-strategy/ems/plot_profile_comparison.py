@@ -80,7 +80,7 @@ ACTIVE_THR = 10.0       # W — below this: glide / motor idle
 
 # Strategy G tuned results (from strategy_g_elev_compare.py)
 H2_ORIG   = 8.669       # g
-H2_PROP   = 4.281       # g
+H2_PROP   = 4.314       # g  (1000 W rated flat pulse)
 KM_M3_ORIG = TOTAL_KM / (H2_ORIG / H2_DENSITY)
 KM_M3_PROP = TOTAL_KM / (H2_PROP / H2_DENSITY)
 
