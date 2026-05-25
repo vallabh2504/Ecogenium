@@ -7,10 +7,16 @@ on real route gradient, with parameter sweep to maximise km/m³ fuel economy.
 Approach:
   - Flat  (|grade| <= GRADE_THRESH): Standard P&G with tunable V_HIGH_FLAT / V_LOW_FLAT
   - Downhill (grade < -GRADE_THRESH): Motor OFF, let gravity accelerate, cap at V_MAX_DOWNHILL
-  - Uphill   (grade > +GRADE_THRESH): Full 1000 W always (no glide on uphill)
+  - Uphill   (grade > +GRADE_THRESH): Full P_BOOST W (but can glide if v > V_HIGH_FLAT)
   - After downhill: if v > V_LOW_FLAT already, skip straight to glide (harvest free KE)
 
-Baseline to beat: Strategy G on elevation-aware P&G → 302.1 km/m³, H2 = 4.314 g
+Key innovation vs standard P&G:
+  1. Downhill: motor fully OFF (vs baseline which sometimes pulses on mild downhills)
+  2. Higher V_MAX_DOWNHILL to harvest more kinetic energy from gravity
+  3. Variable glide entry: enter glide immediately if v > V_LOW_FLAT (skip unnecessary pulse)
+  4. Tune V_HIGH_FLAT / V_LOW_FLAT to find optimal energy balance
+
+Baseline to beat: Strategy G on elevation-aware P&G -> 302.1 km/m3, H2 = 4.314 g
 """
 
 import sys
@@ -46,11 +52,10 @@ GRADE_THRESH = 0.006
 P_RAMP_MAX   = 200.0   # W/step (per DT=0.2s)
 A_STOP       = 0.5     # m/s²  gentle deceleration at lap end
 V_MAX        = 11.0    # m/s   hard speed cap (39.6 km/h)
-V_STALL      = 10.0 / 3.6  # ≈ 2.78 m/s  (10 km/h) — keep motor on regardless
 N_STOP_STEPS = round(4.0 / DT)   # 4 s stop = 20 steps
 
-H2_DENSITY  = 89.88   # g/m³ at STP
-TOTAL_KM    = 14.5
+H2_DENSITY     = 89.88   # g/m³ at STP
+TOTAL_KM       = 14.5
 BASELINE_KM_M3 = 302.1
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -104,6 +109,13 @@ def _build_one_lap(V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
     """
     Forward-Euler one-lap simulation with terrain-adaptive logic.
 
+    Core logic:
+      - Downhill: motor OFF, cap at V_MAX_DOWNHILL (harvest gravity)
+      - Uphill: motor BOOST (P_BOOST W) unless v >= V_HIGH_FLAT (then glide)
+      - Flat P&G: pulse when v <= V_LOW_FLAT, glide when v >= V_HIGH_FLAT
+      - Innovation: after downhill, if v > V_LOW_FLAT, SKIP pulse -> stay in glide
+        (harvest the free kinetic energy rather than burning more fuel)
+
     Returns lists: t, v, P_elec, s, elev, grade
     """
     t_lst     = []
@@ -119,6 +131,8 @@ def _build_one_lap(V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
     mode       = 'PULSE'   # start in pulse to accelerate from stop
     first_step = True
     prev_P     = 0.0
+    # Track whether we just came off downhill (for KE harvesting)
+    was_downhill = False
 
     MAX_LAP_TIME = 700.0   # safety cap
 
@@ -138,34 +152,50 @@ def _build_one_lap(V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
         if mode == 'BRAKE':
             P_target = 0.0
             v_cap    = V_MAX
+
         elif grade < -GRADE_THRESH:
             # Downhill: motor fully OFF, harvest gravity
-            P_target = 0.0
-            v_cap    = V_MAX_DOWNHILL
-            # Force mode to GLIDE so when grade returns to flat, we check
-            # if v > V_LOW_FLAT before deciding to pulse or glide
-            mode = 'GLIDE'
+            P_target     = 0.0
+            v_cap        = V_MAX_DOWNHILL
+            mode         = 'GLIDE'
+            was_downhill = True
+
         elif grade > +GRADE_THRESH:
-            # Uphill: always boost, no glide on uphill
-            P_target = P_BOOST
-            v_cap    = V_MAX
-            mode     = 'PULSE'
-        else:
-            # Flat: standard P&G with terrain-harvesting innovation
-            v_cap = V_HIGH_FLAT + 1.0   # slight overshoot allowed before cap
-            if v <= V_LOW_FLAT:
-                mode     = 'PULSE'
-                P_target = P_PULSE
-            elif v >= V_HIGH_FLAT:
+            # Uphill: boost unless already above V_HIGH_FLAT
+            if v >= V_HIGH_FLAT:
+                # We're fast enough - glide over small hill
                 mode     = 'GLIDE'
                 P_target = 0.0
             else:
-                # Maintain current mode (hysteresis)
-                if mode == 'PULSE':
+                mode     = 'PULSE'
+                P_target = P_BOOST
+            v_cap        = V_MAX
+            was_downhill = False
+
+        else:
+            # Flat: P&G with terrain-harvesting innovation
+            v_cap = V_HIGH_FLAT + 1.0   # slight overshoot allowed before cap
+
+            # After downhill, if v > V_LOW_FLAT -> stay in glide (free KE!)
+            if was_downhill and v > V_LOW_FLAT:
+                mode     = 'GLIDE'
+                P_target = 0.0
+                # was_downhill remains True until v drops to V_LOW_FLAT
+            else:
+                was_downhill = False  # KE exhausted, use normal P&G
+
+                if v <= V_LOW_FLAT:
+                    mode     = 'PULSE'
                     P_target = P_PULSE
-                else:
-                    # GLIDE or coming off downhill with extra speed
+                elif v >= V_HIGH_FLAT:
+                    mode     = 'GLIDE'
                     P_target = 0.0
+                else:
+                    # Hysteresis: maintain current mode
+                    if mode == 'PULSE':
+                        P_target = P_PULSE
+                    else:
+                        P_target = 0.0
 
         # Apply power ramp limit
         P_elec = float(np.clip(P_target,
@@ -202,9 +232,9 @@ def _build_one_lap(V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
             break
 
     # ── 4-second stop at lap line ────────────────────────────────────────────
-    s_end     = float(s_lst[-1])
-    elev_end  = float(elev_lst[-1])
-    grade_end = float(grade_lst[-1])
+    s_end     = float(s_lst[-1]) if s_lst else 0.0
+    elev_end  = float(elev_lst[-1]) if elev_lst else float(_elev_fn(0))
+    grade_end = float(grade_lst[-1]) if grade_lst else 0.0
 
     for _ in range(N_STOP_STEPS):
         t_lst.append(t)
@@ -278,7 +308,7 @@ def build_terrain_profile(V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
 # ── Profile verification ──────────────────────────────────────────────────────
 def verify_profile(t_arr, v_arr, lap_num_arr, silent=False):
     """
-    Returns (ok, total_km, duration_min, n_stops) and optionally prints.
+    Returns (ok, total_km, duration_min, n_stops).
     Race constraints: total_dist > 14.5 km, 34-37 min, exactly 11 stops.
     """
     total_dist_m  = float(np.trapezoid(v_arr, t_arr))
@@ -305,13 +335,7 @@ def verify_profile(t_arr, v_arr, lap_num_arr, silent=False):
 
 # ── Demand array from physics profile ────────────────────────────────────────
 def profile_to_demand(v_arr, P_elec_arr, grade_arr):
-    """
-    Convert motor power + velocity into electrical demand at motor controller.
-
-    For each step: eta_m = motor_eta(P_shaft); P_elec_demand = P_shaft / eta_m
-    But here P_elec_arr is already the motor ELECTRICAL input from the physics sim.
-    We return it clipped to [0, 1000].
-    """
+    """Motor electrical demand [W], clipped to [0, 1000]."""
     return np.clip(P_elec_arr, 0.0, 1000.0)
 
 
@@ -320,7 +344,7 @@ def make_strategy_g(K_p, K_i=2.0, tau=15.0, SC_SOC_0_ref=SC_SOC_0, T_LAP=None):
     """
     Feedforward + SOC-PI (Strategy G variant for custom profiles).
 
-    Returns a callable: fn(P_dem, SOC, P_fc_prev, t_in_lap, lap_idx) → (P_fc, P_filt)
+    Returns callable: fn(P_dem, SOC, P_fc_prev, t_in_lap, lap_idx) -> (P_fc, P_filt)
     """
     alpha = float(np.exp(-DT / tau))
     K_LAP = 0.3
@@ -336,19 +360,16 @@ def make_strategy_g(K_p, K_i=2.0, tau=15.0, SC_SOC_0_ref=SC_SOC_0, T_LAP=None):
         if state['P_filt'] is None:
             state['P_filt'] = float(P_dem)
 
-        # Lap supervisor: adjust offset at lap boundaries
-        t_lap_eff = T_LAP if T_LAP is not None else 190.0   # fallback ~3.2 min
+        t_lap_eff = T_LAP if T_LAP is not None else 190.0
         if lap_idx != state['prev_lap_idx'] and lap_idx > 0:
             E_deficit = (SC_SOC_0_ref - SOC) * SC_E_J
             state['P_lap_offset'] += K_LAP * E_deficit / t_lap_eff
             state['P_lap_offset'] = float(np.clip(state['P_lap_offset'], -200.0, 200.0))
         state['prev_lap_idx'] = lap_idx
 
-        # Low-pass filter on demand
         state['P_filt'] = alpha * state['P_filt'] + (1.0 - alpha) * float(P_dem)
         P_filt = state['P_filt']
 
-        # SOC-PI
         soc_err = SC_SOC_0_ref - SOC
         state['integrator'] += soc_err * DT
         if K_i > 1e-9:
@@ -375,7 +396,7 @@ def simulate_custom(strategy_fn, P_dem_arr, lap_num_arr, t_arr=None, SOC_0=SC_SO
 
     Parameters
     ----------
-    strategy_fn  : callable (P_dem, SOC, P_fc_prev, t_in_lap, lap_idx) → (P_fc, P_filt)
+    strategy_fn  : callable (P_dem, SOC, P_fc_prev, t_in_lap, lap_idx) -> (P_fc, P_filt)
     P_dem_arr    : ndarray — motor electrical demand [W] at each timestep
     lap_num_arr  : ndarray (int) — 1-indexed lap number at each timestep
     t_arr        : ndarray — time [s] (optional, synthesised if None)
@@ -384,7 +405,7 @@ def simulate_custom(strategy_fn, P_dem_arr, lap_num_arr, t_arr=None, SOC_0=SC_SO
     Returns dict with standard fields.
     """
     n = len(P_dem_arr)
-    lap_idx_arr = (lap_num_arr - 1).astype(int)   # 0-indexed
+    lap_idx_arr = (lap_num_arr - 1).astype(int)
 
     if t_arr is None:
         t_arr = np.arange(n) * DT
@@ -400,7 +421,6 @@ def simulate_custom(strategy_fn, P_dem_arr, lap_num_arr, t_arr=None, SOC_0=SC_SO
     lap_SOC[0] = SOC_0
     P_fc_prev  = 0.0
 
-    # Lap start times (for t_in_lap calculation)
     lap_start_t = {}
     for k in range(n):
         li = int(lap_idx_arr[k])
@@ -416,7 +436,7 @@ def simulate_custom(strategy_fn, P_dem_arr, lap_num_arr, t_arr=None, SOC_0=SC_SO
         res = strategy_fn(Pd, soc_k, P_fc_prev, t_in_lap, lap_idx)
         P_fc_cmd = float(res[0]) if isinstance(res, tuple) else float(res)
 
-        # Ramp limiting: only limit upward ramp; instant shutdown allowed
+        # Only limit upward ramp; instant shutdown allowed
         if P_fc_cmd > P_fc_prev:
             P_fc_cmd = min(P_fc_cmd, P_fc_prev + FC_RAMP * DT)
         P_fc_cmd = float(np.clip(P_fc_cmd, 0.0, FC_P_MAX))
@@ -424,7 +444,6 @@ def simulate_custom(strategy_fn, P_dem_arr, lap_num_arr, t_arr=None, SOC_0=SC_SO
         P_sc_k    = Pd - P_fc_cmd
         trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
 
-        # SC floor protection
         if P_sc_k > 0 and trial_soc <= SC_SOC_MIN:
             P_fc_cmd  = float(np.clip(Pd, 0.0, FC_P_MAX))
             P_sc_k    = max(0.0, Pd - P_fc_cmd)
@@ -437,7 +456,6 @@ def simulate_custom(strategy_fn, P_dem_arr, lap_num_arr, t_arr=None, SOC_0=SC_SO
         m_H2_ar[k]    = fc_h2_rate(I_fc_ar[k]) * DT
         P_fc_prev     = P_fc_cmd
 
-        # Record SOC at lap boundaries
         nxt_lap = int(lap_idx_arr[k + 1]) if k + 1 < n else lap_idx + 1
         if nxt_lap != lap_idx:
             lap_SOC[lap_idx + 1] = SOC_ar[k + 1]
@@ -478,140 +496,143 @@ def bisect_kp(P_dem_arr, lap_num_arr, t_arr, T_LAP, tolerance=0.01, max_iter=20)
         if abs(d) <= tolerance:
             break
 
-        # d > 0: SOC drifted high → FC produced too much → raise K_p (more FF correction)
-        # d < 0: SOC drifted low  → FC produced too little → lower K_p
-        # Actually: K_p raises P_cmd when SOC < ref, so higher K_p corrects negative drift
+        # d < 0: SOC drifted low -> need more FC -> raise K_p
+        # d > 0: SOC drifted high -> need less FC -> lower K_p
         if d < -tolerance:
-            lo = K_p   # need more FC output → raise K_p
+            lo = K_p
         else:
-            hi = K_p   # need less FC output → lower K_p
+            hi = K_p
         K_p = (lo + hi) / 2.0
 
     return K_p, best
 
 
-# ── Parameter sweep ───────────────────────────────────────────────────────────
+# ── Single combo evaluation helper ───────────────────────────────────────────
+def _eval_combo(V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
+                P_PULSE=1000.0, P_BOOST=1000.0, tag='', combo_idx=0, total=0,
+                silent=False):
+    """
+    Build profile, verify, bisect K_p, return result dict or None on failure.
+    """
+    prefix = f"[{combo_idx:2d}/{total}] {tag} ... " if tag else ''
+    if not silent:
+        print(prefix, end='', flush=True)
+
+    try:
+        t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr = \
+            build_terrain_profile(
+                V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL, P_PULSE, P_BOOST
+            )
+    except Exception as exc:
+        if not silent:
+            print(f"BUILD ERROR: {exc}")
+        return None
+
+    ok, total_km, dur_min, n_stops = verify_profile(
+        t_arr, v_arr, lap_num_arr, silent=True
+    )
+    if not ok:
+        if not silent:
+            print(f"SKIP (dist={total_km:.2f}km dur={dur_min:.1f}min stops={n_stops})")
+        return None
+
+    P_dem  = profile_to_demand(v_arr, P_arr, grade_arr)
+    T_LAP  = float(t_arr[-1]) / N_LAPS
+    K_p, sim_result = bisect_kp(P_dem, lap_num_arr, t_arr, T_LAP)
+
+    m_H2      = sim_result['m_H2_total']
+    dSOC      = sim_result['delta_SOC']
+    km_m3     = TOTAL_KM / (m_H2 / H2_DENSITY)
+    charge_ok = abs(dSOC) < 0.01
+    mean_Pdem = float(np.mean(P_dem))
+
+    if not silent:
+        print(f"H2={m_H2:.3f}g  km/m3={km_m3:.1f}  ΔSOC={dSOC:+.4f}  "
+              f"Kp={K_p:.0f}  meanP={mean_Pdem:.1f}W  {'OK' if charge_ok else 'NO-CHARGE'}")
+
+    return {
+        'V_HIGH_FLAT':    V_HIGH_FLAT,
+        'V_LOW_FLAT':     V_LOW_FLAT,
+        'V_MAX_DOWNHILL': V_MAX_DOWNHILL,
+        'P_PULSE':        P_PULSE,
+        'P_BOOST':        P_BOOST,
+        'K_p':            K_p,
+        'H2_g':           m_H2,
+        'km_m3':          km_m3,
+        'delta_SOC':      dSOC,
+        'charge_ok':      charge_ok,
+        'total_km':       total_km,
+        'dur_min':        dur_min,
+        'mean_Pdem':      mean_Pdem,
+        'sim_result':     sim_result,
+        't_arr':          t_arr,
+        'v_arr':          v_arr,
+        'P_arr':          P_arr,
+        's_arr':          s_arr,
+        'lap_num_arr':    lap_num_arr,
+        'elev_arr':       elev_arr,
+        'grade_arr':      grade_arr,
+    }
+
+
+def _sort_results(results):
+    cs = [r for r in results if r and r['charge_ok']]
+    nc = [r for r in results if r and not r['charge_ok']]
+    cs.sort(key=lambda r: r['km_m3'], reverse=True)
+    nc.sort(key=lambda r: r['km_m3'], reverse=True)
+    return cs + nc
+
+
+# ── Coarse grid sweep ─────────────────────────────────────────────────────────
 def run_sweep():
     """
     Coarse grid sweep over terrain-adaptive parameters.
 
-    Returns list of result dicts, sorted by km/m³ descending.
+    Key insight: to beat 302 km/m3, need mean P_dem < 131.8 W.
+    This requires maximising glide fraction while keeping average speed high enough.
+
+    Strategy:
+    - Higher V_HIGH_FLAT: extend glide phases (less time pulsing)
+    - Higher V_LOW_FLAT (close to V_HIGH): faster average speed, shorter glide
+    - Downhill motor-off + V_MAX_DOWNHILL cap: free KE on descents
     """
-    V_HIGH_FLAT_GRID   = [7.0, 7.5, 8.0, 8.5, 9.0]
-    V_LOW_FLAT_GRID    = [4.5, 5.0, 5.5, 6.0]
+    # Grid designed to maximize glide fraction while satisfying 34-37 min constraint
+    V_HIGH_FLAT_GRID    = [7.5, 8.0, 8.2, 8.5, 9.0]
+    V_LOW_FLAT_GRID     = [4.5, 5.0, 5.5, 5.8, 6.0, 6.5]
     V_MAX_DOWNHILL_GRID = [9.0, 10.0, 11.0]
 
-    results = []
-
-    total_combos = sum(
-        1
+    combos = [
+        (vhi, vlo, vdh)
         for vhi in V_HIGH_FLAT_GRID
         for vlo in V_LOW_FLAT_GRID
         for vdh in V_MAX_DOWNHILL_GRID
         if vlo < vhi - 1.0
-    )
+    ]
 
-    print(f"\n=== AGENT 3 PARAMETER SWEEP: {total_combos} valid combinations ===\n")
+    print(f"\n=== AGENT 3 PARAMETER SWEEP: {len(combos)} valid combinations ===\n")
 
-    combo_idx = 0
-    for V_HIGH_FLAT in V_HIGH_FLAT_GRID:
-        for V_LOW_FLAT in V_LOW_FLAT_GRID:
-            # Constraint: V_LOW_FLAT < V_HIGH_FLAT - 1.0
-            if V_LOW_FLAT >= V_HIGH_FLAT - 1.0:
-                continue
-            for V_MAX_DOWNHILL in V_MAX_DOWNHILL_GRID:
-                combo_idx += 1
-                tag = (f"V_HI={V_HIGH_FLAT:.1f} V_LO={V_LOW_FLAT:.1f} "
-                       f"V_DH={V_MAX_DOWNHILL:.1f}")
-                print(f"[{combo_idx:2d}/{total_combos}] {tag} ... ", end='', flush=True)
+    results = []
+    for idx, (vhi, vlo, vdh) in enumerate(combos):
+        tag = f"V_HI={vhi:.2f} V_LO={vlo:.2f} V_DH={vdh:.1f}"
+        r = _eval_combo(vhi, vlo, vdh, tag=tag, combo_idx=idx+1, total=len(combos))
+        if r is not None:
+            results.append(r)
 
-                # Build profile
-                try:
-                    t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr = \
-                        build_terrain_profile(
-                            V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
-                            P_PULSE=1000.0, P_BOOST=1000.0
-                        )
-                except Exception as exc:
-                    print(f"BUILD ERROR: {exc}")
-                    continue
-
-                # Verify
-                ok, total_km, dur_min, n_stops = verify_profile(
-                    t_arr, v_arr, lap_num_arr, silent=True
-                )
-                if not ok:
-                    print(f"SKIP (dist={total_km:.2f}km dur={dur_min:.1f}min stops={n_stops})")
-                    continue
-
-                # Demand array
-                P_dem = profile_to_demand(v_arr, P_arr, grade_arr)
-
-                # Mean lap duration for lap supervisor
-                T_LAP = float(t_arr[-1]) / N_LAPS
-
-                # Bisect K_p
-                K_p, sim_result = bisect_kp(P_dem, lap_num_arr, t_arr, T_LAP)
-
-                m_H2   = sim_result['m_H2_total']
-                dSOC   = sim_result['delta_SOC']
-                km_m3  = TOTAL_KM / (m_H2 / H2_DENSITY)
-                charge_ok = abs(dSOC) < 0.01
-
-                print(f"H2={m_H2:.3f}g  km/m³={km_m3:.1f}  ΔSOC={dSOC:+.4f}  "
-                      f"Kp={K_p:.0f}  {'OK' if charge_ok else 'NO-CHARGE'}")
-
-                results.append({
-                    'V_HIGH_FLAT':    V_HIGH_FLAT,
-                    'V_LOW_FLAT':     V_LOW_FLAT,
-                    'V_MAX_DOWNHILL': V_MAX_DOWNHILL,
-                    'K_p':            K_p,
-                    'H2_g':           m_H2,
-                    'km_m3':          km_m3,
-                    'delta_SOC':      dSOC,
-                    'charge_ok':      charge_ok,
-                    'total_km':       total_km,
-                    'dur_min':        dur_min,
-                    'sim_result':     sim_result,
-                    't_arr':          t_arr,
-                    'v_arr':          v_arr,
-                    'P_arr':          P_arr,
-                    's_arr':          s_arr,
-                    'lap_num_arr':    lap_num_arr,
-                    'elev_arr':       elev_arr,
-                    'grade_arr':      grade_arr,
-                })
-
-    # Sort by km/m³ descending (charge-sustained first)
-    results_cs = [r for r in results if r['charge_ok']]
-    results_nc = [r for r in results if not r['charge_ok']]
-    results_cs.sort(key=lambda r: r['km_m3'], reverse=True)
-    results_nc.sort(key=lambda r: r['km_m3'], reverse=True)
-
-    return results_cs + results_nc
+    return _sort_results(results)
 
 
 # ── Fine-tuning sweep around best result ─────────────────────────────────────
 def run_fine_sweep(best):
-    """
-    Fine-tune around the best coarse result.
-    """
+    """Fine-tune around the best coarse result with 0.1 m/s steps."""
     v_hi_base = best['V_HIGH_FLAT']
     v_lo_base = best['V_LOW_FLAT']
     v_dh_base = best['V_MAX_DOWNHILL']
 
-    V_HI_FINE   = sorted(set([
-        round(v_hi_base - 0.25, 2), v_hi_base, round(v_hi_base + 0.25, 2)
-    ]))
-    V_LO_FINE   = sorted(set([
-        round(v_lo_base - 0.25, 2), v_lo_base, round(v_lo_base + 0.25, 2)
-    ]))
-    V_DH_FINE   = sorted(set([
-        round(v_dh_base - 0.5, 1), v_dh_base, round(v_dh_base + 0.5, 1)
-    ]))
+    V_HI_FINE  = sorted(set([round(v + 0.1 * i, 2) for v in [v_hi_base] for i in [-2,-1,0,1,2]]))
+    V_LO_FINE  = sorted(set([round(v + 0.1 * i, 2) for v in [v_lo_base] for i in [-2,-1,0,1,2]]))
+    V_DH_FINE  = sorted(set([v_dh_base - 0.5, v_dh_base, v_dh_base + 0.5]))
 
-    results = []
-    combos  = [
+    combos = [
         (vhi, vlo, vdh)
         for vhi in V_HI_FINE
         for vlo in V_LO_FINE
@@ -619,75 +640,26 @@ def run_fine_sweep(best):
         if vlo < vhi - 1.0 and vlo > 0 and vhi > 0 and vdh > 0
     ]
 
+    # Remove the base combo to avoid duplicate
+    combos = [c for c in combos if not (
+        c[0] == v_hi_base and c[1] == v_lo_base and c[2] == v_dh_base
+    )]
+
     print(f"\n=== FINE SWEEP: {len(combos)} combinations around best ===\n")
 
-    for idx, (V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL) in enumerate(combos):
-        tag = (f"V_HI={V_HIGH_FLAT:.2f} V_LO={V_LOW_FLAT:.2f} "
-               f"V_DH={V_MAX_DOWNHILL:.2f}")
-        print(f"[{idx+1:2d}/{len(combos)}] {tag} ... ", end='', flush=True)
+    results = []
+    for idx, (vhi, vlo, vdh) in enumerate(combos):
+        tag = f"V_HI={vhi:.2f} V_LO={vlo:.2f} V_DH={vdh:.1f}"
+        r = _eval_combo(vhi, vlo, vdh, tag=tag, combo_idx=idx+1, total=len(combos))
+        if r is not None:
+            results.append(r)
 
-        try:
-            t_arr, v_arr, P_arr, s_arr, lap_num_arr, elev_arr, grade_arr = \
-                build_terrain_profile(
-                    V_HIGH_FLAT, V_LOW_FLAT, V_MAX_DOWNHILL,
-                    P_PULSE=1000.0, P_BOOST=1000.0
-                )
-        except Exception as exc:
-            print(f"BUILD ERROR: {exc}")
-            continue
-
-        ok, total_km, dur_min, n_stops = verify_profile(
-            t_arr, v_arr, lap_num_arr, silent=True
-        )
-        if not ok:
-            print(f"SKIP (dist={total_km:.2f}km dur={dur_min:.1f}min stops={n_stops})")
-            continue
-
-        P_dem  = profile_to_demand(v_arr, P_arr, grade_arr)
-        T_LAP  = float(t_arr[-1]) / N_LAPS
-        K_p, sim_result = bisect_kp(P_dem, lap_num_arr, t_arr, T_LAP)
-
-        m_H2   = sim_result['m_H2_total']
-        dSOC   = sim_result['delta_SOC']
-        km_m3  = TOTAL_KM / (m_H2 / H2_DENSITY)
-        charge_ok = abs(dSOC) < 0.01
-
-        print(f"H2={m_H2:.3f}g  km/m³={km_m3:.1f}  ΔSOC={dSOC:+.4f}  "
-              f"Kp={K_p:.0f}  {'OK' if charge_ok else 'NO-CHARGE'}")
-
-        results.append({
-            'V_HIGH_FLAT':    V_HIGH_FLAT,
-            'V_LOW_FLAT':     V_LOW_FLAT,
-            'V_MAX_DOWNHILL': V_MAX_DOWNHILL,
-            'K_p':            K_p,
-            'H2_g':           m_H2,
-            'km_m3':          km_m3,
-            'delta_SOC':      dSOC,
-            'charge_ok':      charge_ok,
-            'total_km':       total_km,
-            'dur_min':        dur_min,
-            'sim_result':     sim_result,
-            't_arr':          t_arr,
-            'v_arr':          v_arr,
-            'P_arr':          P_arr,
-            's_arr':          s_arr,
-            'lap_num_arr':    lap_num_arr,
-            'elev_arr':       elev_arr,
-            'grade_arr':      grade_arr,
-        })
-
-    results_cs = [r for r in results if r['charge_ok']]
-    results_nc = [r for r in results if not r['charge_ok']]
-    results_cs.sort(key=lambda r: r['km_m3'], reverse=True)
-    results_nc.sort(key=lambda r: r['km_m3'], reverse=True)
-
-    return results_cs + results_nc
+    return _sort_results(results)
 
 
 # ── Save best profile CSV ─────────────────────────────────────────────────────
 def save_best_csv(best):
     out_path = os.path.join(MATLAB_DIR, 'sem_agent3_best.csv')
-    sim      = best['sim_result']
     P_dem    = profile_to_demand(best['v_arr'], best['P_arr'], best['grade_arr'])
 
     df = pd.DataFrame({
@@ -701,7 +673,7 @@ def save_best_csv(best):
         'P_elec_W':      P_dem,
     })
     df.to_csv(out_path, index=False)
-    print(f"  Best profile CSV saved → {out_path}")
+    print(f"  Best profile CSV saved -> {out_path}")
     return out_path
 
 
@@ -709,9 +681,9 @@ def save_best_csv(best):
 def save_result_figure(best):
     """
     3-panel figure:
-      Top:          Single-lap velocity coloured by terrain
+      Top:          Single-lap velocity coloured by terrain mode
       Bottom-left:  Elevation profile overlaid on velocity
-      Bottom-right: Bar chart comparing agent3 best vs baseline km/m³
+      Bottom-right: Bar chart comparing agent3 best vs baseline km/m3
     """
     out_path = os.path.join(RESULTS_DIR, 'agent3_terrain_adaptive_result.png')
 
@@ -724,13 +696,12 @@ def save_result_figure(best):
     lap_num_arr = best['lap_num_arr']
     km_m3       = best['km_m3']
 
-    # Lap 1 mask
-    mask1    = lap_num_arr == 1
-    s1       = s_arr[mask1]
-    v1       = v_arr[mask1] * 3.6   # km/h
-    g1       = grade_arr[mask1]
-    P1       = P_arr[mask1]
-    e1       = elev_arr[mask1]
+    mask1 = lap_num_arr == 1
+    s1    = s_arr[mask1]
+    v1    = v_arr[mask1] * 3.6
+    g1    = grade_arr[mask1]
+    P1    = P_arr[mask1]
+    e1    = elev_arr[mask1]
 
     def _seg_color(i):
         if g1[i] < -GRADE_THRESH:
@@ -739,7 +710,7 @@ def save_result_figure(best):
             return 'tomato'         # uphill
         elif v1[i] == 0.0:
             return 'black'          # brake/stop
-        elif P1[i] > 0:
+        elif P1[i] > 10:
             return 'darkorange'     # flat-pulse
         else:
             return 'mediumseagreen' # flat-glide
@@ -747,20 +718,20 @@ def save_result_figure(best):
     fig = plt.figure(figsize=(16, 12))
     fig.suptitle(
         "Agent 3 — Terrain-Adaptive Velocity Profile | Hydraix I | Silesia Ring SEM 2026\n"
-        f"V_HIGH_FLAT={best['V_HIGH_FLAT']:.1f} m/s  "
-        f"V_LOW_FLAT={best['V_LOW_FLAT']:.1f} m/s  "
+        f"V_HIGH_FLAT={best['V_HIGH_FLAT']:.2f} m/s ({best['V_HIGH_FLAT']*3.6:.1f} km/h)  "
+        f"V_LOW_FLAT={best['V_LOW_FLAT']:.2f} m/s ({best['V_LOW_FLAT']*3.6:.1f} km/h)  "
         f"V_MAX_DH={best['V_MAX_DOWNHILL']:.1f} m/s  "
-        f"→ {km_m3:.1f} km/m³  H2={best['H2_g']:.3f} g",
-        fontsize=12, fontweight='bold', y=0.99
+        f"-> {km_m3:.1f} km/m3  H2={best['H2_g']:.3f} g",
+        fontsize=11, fontweight='bold', y=0.99
     )
 
-    gs = fig.add_gridspec(2, 2, hspace=0.40, wspace=0.30,
+    gs = fig.add_gridspec(2, 2, hspace=0.42, wspace=0.30,
                           height_ratios=[1.4, 1.0])
-    ax_top  = fig.add_subplot(gs[0, :])     # full width top
-    ax_bl   = fig.add_subplot(gs[1, 0])     # bottom left
-    ax_br   = fig.add_subplot(gs[1, 1])     # bottom right
+    ax_top = fig.add_subplot(gs[0, :])
+    ax_bl  = fig.add_subplot(gs[1, 0])
+    ax_br  = fig.add_subplot(gs[1, 1])
 
-    # ── Top panel: velocity vs distance, coloured by terrain ──────────────
+    # ── Top panel: velocity vs distance, coloured by terrain mode ─────────
     for i in range(len(s1) - 1):
         c = _seg_color(i)
         ax_top.plot(s1[i:i+2], v1[i:i+2], color=c, linewidth=1.2)
@@ -773,10 +744,10 @@ def save_result_figure(best):
                    label=f"V_LOW_FLAT  = {best['V_LOW_FLAT']*3.6:.1f} km/h")
     ax_top.axhline(best['V_MAX_DOWNHILL'] * 3.6, color='steelblue',
                    linestyle='--', linewidth=0.7, alpha=0.6,
-                   label=f"V_MAX_DH    = {best['V_MAX_DOWNHILL']*3.6:.1f} km/h")
+                   label=f"V_MAX_DH = {best['V_MAX_DOWNHILL']*3.6:.1f} km/h")
 
     legend_handles = [
-        mpatches.Patch(color='tomato',         label='Uphill (full power)'),
+        mpatches.Patch(color='tomato',         label='Uphill (boost/glide)'),
         mpatches.Patch(color='steelblue',      label='Downhill (motor off)'),
         mpatches.Patch(color='darkorange',     label='Flat — pulse'),
         mpatches.Patch(color='mediumseagreen', label='Flat — glide'),
@@ -789,12 +760,10 @@ def save_result_figure(best):
     ax_top.set_xlim(0, D_LAP)
     ax_top.grid(True, lw=0.3, alpha=0.5)
 
-    # ── Bottom-left: elevation overlaid ───────────────────────────────────
+    # ── Bottom-left: elevation overlay ────────────────────────────────────
     ax_bl2 = ax_bl.twinx()
-    ax_bl2.plot(s1, e1, color='saddlebrown', linewidth=1.2,
-                alpha=0.7, label='Elevation')
-    ax_bl2.fill_between(s1, e1, float(np.min(e1)), color='saddlebrown',
-                        alpha=0.12)
+    ax_bl2.plot(s1, e1, color='saddlebrown', linewidth=1.2, alpha=0.7, label='Elevation')
+    ax_bl2.fill_between(s1, e1, float(np.min(e1)), color='saddlebrown', alpha=0.12)
     ax_bl2.set_ylabel('Elevation [m]', fontsize=9, color='saddlebrown')
     ax_bl2.tick_params(axis='y', labelcolor='saddlebrown')
 
@@ -802,10 +771,8 @@ def save_result_figure(best):
         c = _seg_color(i)
         ax_bl.plot(s1[i:i+2], v1[i:i+2], color=c, linewidth=1.0, alpha=0.8)
 
-    ax_bl.axhline(best['V_HIGH_FLAT'] * 3.6, color='gray',
-                  linestyle='--', linewidth=0.7)
-    ax_bl.axhline(best['V_LOW_FLAT']  * 3.6, color='gray',
-                  linestyle=':',  linewidth=0.7)
+    ax_bl.axhline(best['V_HIGH_FLAT'] * 3.6, color='gray', linestyle='--', linewidth=0.7)
+    ax_bl.axhline(best['V_LOW_FLAT']  * 3.6, color='gray', linestyle=':',  linewidth=0.7)
     ax_bl.set_xlabel('Distance in lap [m]', fontsize=9)
     ax_bl.set_ylabel('Velocity [km/h]', fontsize=9)
     ax_bl.set_title('Velocity + Elevation Overlay (Lap 1)', fontsize=9, fontweight='bold')
@@ -815,42 +782,65 @@ def save_result_figure(best):
     # ── Bottom-right: bar chart comparison ────────────────────────────────
     labels  = ['Baseline\n(Elev P&G\nStrategy G)', 'Agent 3\n(Terrain-Adaptive)']
     values  = [BASELINE_KM_M3, km_m3]
-    colors  = ['#4a90d9', '#e05a3a' if km_m3 < BASELINE_KM_M3 else '#2ecc71']
+    colors  = ['#4a90d9', '#2ecc71' if km_m3 >= BASELINE_KM_M3 else '#e05a3a']
 
-    bars = ax_br.bar(labels, values, color=colors, width=0.5, edgecolor='white',
-                     linewidth=1.5)
-
+    bars = ax_br.bar(labels, values, color=colors, width=0.5,
+                     edgecolor='white', linewidth=1.5)
     for bar, val in zip(bars, values):
         ax_br.text(bar.get_x() + bar.get_width() / 2,
                    bar.get_height() + 2,
                    f"{val:.1f}", ha='center', va='bottom',
                    fontsize=12, fontweight='bold')
 
-    ax_br.axhline(BASELINE_KM_M3, color='gray', linestyle='--', linewidth=1.0,
-                  alpha=0.6, label=f'Baseline {BASELINE_KM_M3:.1f}')
-    ax_br.set_ylabel('Fuel Economy [km/m³]', fontsize=10)
+    ax_br.axhline(BASELINE_KM_M3, color='gray', linestyle='--', linewidth=1.0, alpha=0.6)
+    ax_br.set_ylabel('Fuel Economy [km/m3]', fontsize=10)
     ax_br.set_title('Fuel Economy Comparison', fontsize=10, fontweight='bold')
-    ax_br.set_ylim(0, max(values) * 1.15)
+    ax_br.set_ylim(0, max(values) * 1.20)
     ax_br.grid(True, axis='y', lw=0.3, alpha=0.5)
 
     delta = km_m3 - BASELINE_KM_M3
     sign  = '+' if delta >= 0 else ''
     ax_br.text(0.5, 0.05,
-               f"Delta: {sign}{delta:.1f} km/m³\n"
+               f"Delta: {sign}{delta:.1f} km/m3\n"
                f"({'BEATS' if delta > 0 else 'BELOW'} baseline)",
                transform=ax_br.transAxes,
-               ha='center', va='bottom',
-               fontsize=10, fontweight='bold',
+               ha='center', va='bottom', fontsize=10, fontweight='bold',
                color='#006400' if delta > 0 else '#8b0000')
+
+    # Add summary text box with key metrics
+    textstr = (
+        f"Mean P_dem:  {best['mean_Pdem']:.1f} W\n"
+        f"H2 consumed: {best['H2_g']:.3f} g\n"
+        f"Charge OK:   {'Yes' if best['charge_ok'] else 'No'}\n"
+        f"Dur: {best['dur_min']:.1f} min  Dist: {best['total_km']:.3f} km"
+    )
+    ax_br.text(0.97, 0.97, textstr,
+               transform=ax_br.transAxes, va='top', ha='right',
+               fontsize=8, fontfamily='monospace',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
     fig.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    print(f"  Figure saved → {out_path}")
+    print(f"  Figure saved -> {out_path}")
     return out_path
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    print("Loading route data ...")
+    print(f"  D_LAP = {D_LAP:.3f} m")
+    print(f"  Elevation: min={_e_smooth.min():.1f} max={_e_smooth.max():.1f} m "
+          f"(delta={_e_smooth.max()-_e_smooth.min():.1f} m)")
+
+    # Grade fractions
+    gt = GRADE_THRESH
+    uphill_frac   = float(np.mean(_grad_smooth > +gt))
+    downhill_frac = float(np.mean(_grad_smooth < -gt))
+    flat_frac     = float(np.mean(np.abs(_grad_smooth) <= gt))
+    print(f"  Grade fractions: uphill={uphill_frac*100:.1f}%  "
+          f"downhill={downhill_frac*100:.1f}%  flat={flat_frac*100:.1f}%")
+    print()
+
     # 1. Coarse sweep
     coarse_results = run_sweep()
 
@@ -859,16 +849,17 @@ if __name__ == '__main__':
         sys.exit(1)
 
     best_coarse = coarse_results[0]
-    print(f"\nBest coarse: V_HI={best_coarse['V_HIGH_FLAT']:.1f}  "
-          f"V_LO={best_coarse['V_LOW_FLAT']:.1f}  "
+    print(f"\nBest coarse: V_HI={best_coarse['V_HIGH_FLAT']:.2f}  "
+          f"V_LO={best_coarse['V_LOW_FLAT']:.2f}  "
           f"V_DH={best_coarse['V_MAX_DOWNHILL']:.1f}  "
-          f"km/m³={best_coarse['km_m3']:.1f}  ΔSOC={best_coarse['delta_SOC']:+.4f}")
+          f"km/m3={best_coarse['km_m3']:.1f}  ΔSOC={best_coarse['delta_SOC']:+.4f}  "
+          f"meanP={best_coarse['mean_Pdem']:.1f}W")
 
     # 2. Fine sweep
     fine_results = run_fine_sweep(best_coarse)
 
     # 3. Pick overall best (prefer charge-sustained)
-    all_results = coarse_results + fine_results
+    all_results = [r for r in (coarse_results + fine_results) if r is not None]
     cs_results  = [r for r in all_results if r['charge_ok']]
     if cs_results:
         cs_results.sort(key=lambda r: r['km_m3'], reverse=True)
