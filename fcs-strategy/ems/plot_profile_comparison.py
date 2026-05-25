@@ -5,8 +5,8 @@ Publication-quality comparison figures — Original vs Proposed velocity profile
   Proposed : Elevation-aware Pulse-and-Glide profile   (sem_2026_elev_aware.csv)
 
 Outputs (saved to results/ems/):
-  plot1_velocity_time.png        Single-lap velocity vs time
-  plot2_power_distribution.png   Motor power demand distribution + efficiency bands
+  plot1_velocity_time.png        Single-lap velocity vs time (standalone)
+  plot_combined_comparison.png   Velocity profile (top) + motor power & efficiency (bottom 4)
   plot3_comparison_table.png     Head-to-head metrics table
 """
 
@@ -287,63 +287,74 @@ e_loss_p = float(np.sum(P_prop_act - p_out_prop_act)) * DT
 
 fig2 = plt.figure(figsize=(14, 11), dpi=300)
 fig2.suptitle(
-    'BAFANG RM G060.1000 Motor Efficiency — Operating-Point Comparison\n'
+    'Velocity Profile & Motor Operating-Point Analysis\n'
     'Original (Canonical GPS)  vs  Proposed (Elevation-Aware Pulse-and-Glide)',
     fontsize=11, fontweight='bold', y=0.985,
 )
 gs2 = fig2.add_gridspec(3, 2, hspace=0.50, wspace=0.30,
-                         height_ratios=[1.45, 1.0, 1.0])
-ax_eff  = fig2.add_subplot(gs2[0, :])   # full-width: η curve + clouds
+                         height_ratios=[1.3, 1.0, 1.0])
+ax_eff  = fig2.add_subplot(gs2[0, :])   # full-width: single-lap velocity profile
 ax_ph   = fig2.add_subplot(gs2[1, 0])   # P_elec histogram
 ax_eh   = fig2.add_subplot(gs2[1, 1])   # η histogram
 ax_bar2 = fig2.add_subplot(gs2[2, 0])   # efficiency-band bars
 ax_tab2 = fig2.add_subplot(gs2[2, 1])   # summary metrics
 
-# ── Row 1: BAFANG η curve + operating-point density ──────────────────────────
-P_crv   = np.linspace(0, 1250, 1000)
-eta_crv = motor_eta(P_crv)
+# ── Row 1: Single-lap velocity profile (Original vs Proposed) ─────────────────
+prev_state = glide_mask[0]
+seg_start  = t_prop_1lap[0]
+for k in range(1, len(t_prop_1lap)):
+    if glide_mask[k] != prev_state or k == len(t_prop_1lap) - 1:
+        seg_end = t_prop_1lap[k]
+        if prev_state:
+            ax_eff.axvspan(seg_start, seg_end, color='#f5f5f5', zorder=0,
+                           linewidth=0, alpha=0.95)
+        seg_start  = t_prop_1lap[k]
+        prev_state = glide_mask[k]
 
-for lo, hi, col, _ in ETA_BANDS:
-    ax_eff.axhspan(lo, hi, color=col, alpha=0.18, zorder=0)
+ax_eff.axhline(0, color='#cccccc', lw=0.5, zorder=1)
+ax_eff.axhline(mean_v_o, color=C_ORIG, lw=0.9, ls=':', alpha=0.65, zorder=2)
+ax_eff.axhline(mean_v_p, color=C_PROP, lw=0.9, ls=':', alpha=0.65, zorder=2)
 
-from ems_core import _M_POUT_S, _M_ETA_S
-ax_eff.plot(_M_POUT_S, _M_ETA_S, 'k-', lw=2.2, zorder=5, label='BAFANG efficiency curve')
-ax_eff.plot(_M_POUT_S, _M_ETA_S, 'wo', ms=3.0, zorder=6,
-            markeredgecolor='k', markeredgewidth=0.4)
+ax_eff.plot(t_orig_1lap, v_orig_1lap, color=C_ORIG, lw=1.8, zorder=4,
+            label=f'Original  (mean {mean_v_o:.1f} km/h, peak {max_v_o:.1f} km/h)')
+ax_eff.plot(t_prop_1lap, v_prop_1lap, color=C_PROP, lw=1.8, zorder=4,
+            label=f'Proposed  (mean {mean_v_p:.1f} km/h, peak {max_v_p:.1f} km/h)')
 
-def _op_cloud(ax, p_out, eta_v, color, label):
-    rng = np.random.default_rng(42)
-    jx  = rng.normal(0, 4, len(p_out))
-    jy  = rng.normal(0, 0.0015, len(eta_v))
-    ax.scatter(p_out + jx, eta_v + jy,
-               color=color, alpha=0.20, s=2.5, zorder=3, linewidths=0,
-               label=f'{label}  (n={len(p_out):,})')
-    xe = np.linspace(0, 1250, 80);  ye = np.linspace(0.15, 0.88, 60)
-    H, xe2, ye2 = np.histogram2d(p_out, eta_v, bins=[xe, ye])
-    Hs = gaussian_filter1d(gaussian_filter1d(H, sigma=2.0, axis=0), sigma=2.0, axis=1)
-    Xc = 0.5*(xe2[:-1]+xe2[1:]);  Yc = 0.5*(ye2[:-1]+ye2[1:])
-    lvls = np.percentile(Hs[Hs > 0], [50, 75, 90, 97])
-    if len(np.unique(lvls)) > 1:
-        ax.contour(Xc, Yc, Hs.T, levels=lvls,
-                   colors=[color], linewidths=[0.5, 0.8, 1.1, 1.6], alpha=0.85, zorder=4)
+t_ann = 0.97 * T_lap_orig
+ax_eff.annotate(f'$\\bar{{v}}_\\mathrm{{orig}}$ = {mean_v_o:.1f}',
+                xy=(t_ann, mean_v_o), xytext=(0, 5), textcoords='offset points',
+                color=C_ORIG, fontsize=8, ha='right', va='bottom', style='italic')
+ax_eff.annotate(f'$\\bar{{v}}_\\mathrm{{prop}}$ = {mean_v_p:.1f}',
+                xy=(t_ann, mean_v_p), xytext=(0, -10), textcoords='offset points',
+                color=C_PROP, fontsize=8, ha='right', va='top', style='italic')
 
-_op_cloud(ax_eff, p_out_orig_act, eta_orig_act, C_ORIG, 'Original')
-_op_cloud(ax_eff, p_out_prop_act, eta_prop_act, C_PROP, 'Proposed')
+glide_patch_v = mpatches.Patch(facecolor='#e8e8e8', edgecolor='none',
+                                label='Glide phase (motor off)')
+handles_v, labels_v = ax_eff.get_legend_handles_labels()
+ax_eff.legend(handles=handles_v + [glide_patch_v],
+              labels=labels_v + ['Glide phase (motor off)'],
+              loc='upper right', framealpha=0.92, fontsize=8.5)
 
-band_patches = [mpatches.Patch(color=c, alpha=0.45, label=n) for _, _, c, n in ETA_BANDS]
-h2, l2 = ax_eff.get_legend_handles_labels()
-ax_eff.legend(handles=h2 + band_patches, fontsize=7.5, loc='lower right', ncol=2,
-              framealpha=0.92)
-ax_eff.annotate('Peak η = 83.4%\n@ 1213 W',
-                xy=(1213, 0.834), xytext=(940, 0.795), fontsize=8, color='#1a6e2e',
-                arrowprops=dict(arrowstyle='->', color='#1a6e2e', lw=0.9),
-                bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='#cccccc', alpha=0.85))
-ax_eff.set_xlabel('Motor shaft output power  $P_\\mathrm{out}$  [W]', fontsize=10)
-ax_eff.set_ylabel('Motor efficiency  η  [—]', fontsize=10)
-ax_eff.set_title('Motor Efficiency Curve — Operating-Point Density  '
-                 '(scatter + iso-density contours)', fontsize=10, fontweight='bold')
-ax_eff.set_xlim(0, 1260);  ax_eff.set_ylim(0.15, 0.88)
-ax_eff.grid(True, lw=0.3, alpha=0.5)
+ax_eff.set_xlabel('Time within lap  [s]', fontsize=10)
+ax_eff.set_ylabel('Vehicle speed  [km/h]', fontsize=10)
+ax_eff.set_title('Single-Lap Velocity Profile — Original vs Proposed',
+                 fontsize=10, fontweight='bold', pad=6)
+ax_eff.set_xlim(0, max(t_orig_1lap[-1], t_prop_1lap[-1]) * 1.02)
+ax_eff.set_ylim(-0.5, max(max_v_o, max_v_p) * 1.12)
+ax_eff.yaxis.set_major_locator(mticker.MultipleLocator(5))
+ax_eff.xaxis.set_major_locator(mticker.MultipleLocator(20))
+
+ax_eff_top = ax_eff.twiny()
+ax_eff_top.set_xlim(ax_eff.get_xlim())
+mps_orig_top = mean_v_o / 3.6
+tick_t_top   = [d / mps_orig_top for d in range(0, int(dist_orig / N_LAPS * 1000) + 1, 200)]
+tick_lbl_top = [f'{d}' for d in range(0, int(dist_orig / N_LAPS * 1000) + 1, 200)]
+ax_eff_top.set_xticks(tick_t_top)
+ax_eff_top.set_xticklabels(tick_lbl_top, fontsize=7.5)
+ax_eff_top.set_xlabel('Approximate lap distance  [m]', fontsize=8.5, labelpad=3)
+ax_eff_top.spines['top'].set_visible(True)
+ax_eff_top.spines['top'].set_linewidth(0.6)
+ax_eff_top.tick_params(axis='x', direction='out', length=3, width=0.6)
 
 # ── Row 2 left: P_elec histogram (active only) ───────────────────────────────
 bins_p = np.arange(0, 1321, 40)
@@ -444,7 +455,7 @@ for (r, c), cell in tbl.get_celld().items():
 ax_tab2.set_title('Summary Metrics', fontsize=9, fontweight='bold', pad=10)
 
 fig2.tight_layout(rect=[0, 0, 1, 0.975])
-out2 = os.path.join(RESULTS_DIR, 'plot2_power_distribution.png')
+out2 = os.path.join(RESULTS_DIR, 'plot_combined_comparison.png')
 fig2.savefig(out2, dpi=300, bbox_inches='tight', facecolor='white')
 plt.close(fig2)
 print(f"  Saved → {out2}")
@@ -687,4 +698,4 @@ fig3.savefig(out3, dpi=300, bbox_inches='tight', facecolor='white')
 plt.close(fig3)
 print(f"  Saved → {out3}")
 
-print("\nAll 3 publication-quality plots saved successfully.")
+print("\nAll publication-quality plots saved successfully.")
