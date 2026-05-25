@@ -189,43 +189,49 @@ print(f"  Mean P_fc      : {float(np.mean(best['P_fc'])):.1f} W")
 print(f"  Race duration  : {RACE_DUR_S/60:.1f} min")
 print(f"──────────────────────────────────────────────────────────────────")
 
-# ── Plot ───────────────────────────────────────────────────────────────────────
-fig, axes = plt.subplots(4, 1, figsize=(14, 11), sharex=True)
+# ── Plot — single lap 1 ────────────────────────────────────────────────────────
+lap1 = lap_num_all == 1
+t_l  = best['t'][lap1] - best['t'][lap1][0]   # zero-based [s]
+t_l_min = t_l / 60.0
+
+fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
 fig.suptitle(
-    f"Strategy A (2D LUT) — Elevation-Aware P&G Profile  |  "
+    f"Strategy A (2D LUT) — Elevation-Aware P&G Profile  |  Single Lap 1\n"
     f"P_base={MEAN_P_DEM:.0f} W  |  K_soc={K_soc:.0f}  |  "
-    f"ΔSOC={delta_soc:+.4f}  |  H2={m_H2:.3f} g  |  {km_m3:.0f} km/m³",
+    f"ΔSOC (full race)={delta_soc:+.4f}  |  H2 (full race)={m_H2:.3f} g  |  {km_m3:.0f} km/m³",
     fontsize=10, fontweight='bold',
 )
 
 ax0 = axes[0]
-ax0.plot(t_min, best['P_dem'], color='black',      lw=0.5, label='P_dem')
-ax0.plot(t_min, best['P_fc'],  color='steelblue',  lw=0.9, label='P_fc')
-ax0.plot(t_min, best['P_sc'],  color='darkorange', lw=0.7, label='P_sc')
+ax0.plot(t_l_min, best['P_dem'][lap1], color='black',      lw=1.2, label='P_dem')
+ax0.plot(t_l_min, best['P_fc'][lap1],  color='steelblue',  lw=1.4, label='P_fc')
+ax0.plot(t_l_min, best['P_sc'][lap1],  color='darkorange', lw=1.1, label='P_sc')
+ax0.axhline(0, color='#cccccc', lw=0.5)
 ax0.set_ylabel('Power [W]')
 ax0.legend(loc='upper right', fontsize=8)
 ax0.grid(True, lw=0.3)
 
 ax1 = axes[1]
-ax1.plot(t_min, best['SOC'], color='green', lw=0.8)
-ax1.axhline(SC_SOC_0, color='black', lw=0.8, ls='--', label=f'SOC_0={SC_SOC_0}')
+ax1.plot(t_l_min, best['SOC'][lap1], color='green', lw=1.4)
+ax1.axhline(SC_SOC_0, color='black', lw=0.8, ls='--', label=f'SOC_0 = {SC_SOC_0}')
 ax1.set_ylabel('SC SOC [—]')
-ax1.set_ylim(0.0, 1.0)
+ax1.set_ylim(0.35, 0.75)
 ax1.legend(loc='upper right', fontsize=8)
 ax1.grid(True, lw=0.3)
 
 ax2 = axes[2]
-ax2.plot(t_min, best['I_fc'], color='firebrick', lw=0.8)
+ax2.plot(t_l_min, best['I_fc'][lap1], color='firebrick', lw=1.4)
 ax2.set_ylabel('I_fc [A]')
 ax2.grid(True, lw=0.3)
 
 ax3 = axes[3]
-ax3.plot(t_min, cum_H2, color='darkviolet', lw=0.8)
+cum_H2_lap1 = np.cumsum(K_H2 * best['I_fc'][lap1] * DT)
+ax3.plot(t_l_min, cum_H2_lap1, color='darkviolet', lw=1.4)
 ax3.set_ylabel('Cumulative H2 [g]')
-ax3.set_xlabel('Time [min]')
+ax3.set_xlabel('Time within lap [min]')
 ax3.grid(True, lw=0.3)
 
-fig.tight_layout(rect=[0, 0, 1, 0.96])
+fig.tight_layout(rect=[0, 0, 1, 0.94])
 out = os.path.join(RESULTS_DIR, 'strategy_a_elev_comparison.png')
 fig.savefig(out, dpi=150, bbox_inches='tight')
 plt.close(fig)
