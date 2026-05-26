@@ -5,7 +5,8 @@ System:  balticFuelCells LC 52.30 FC + HyCap 20P×16S supercap bank + BAFANG mot
 Race:    Silesia Ring SEM 2026, 11 laps × 14.5 km, ~35 min (3.18 min/lap)
 
 Supercapacitor module: HyCap 3.8V / 250F LIC cells, 20 parallel × 16 series
-  V_max = 60.8 V,  C_bank = 312.5 F,  E_sc ≈ 120.3 Wh,  ESR ≈ 2.4 mΩ.
+  V_max = 60.8 V,  V_min = 40.0 V (cell min 2.5 V × 16S),  C_bank = 312.5 F
+  E_sc ≈ 91.0 Wh,  ESR ≈ 2.4 mΩ.
   (mini-caps 2.7V / 50F not modelled — role in circuit TBD)
 
 FC model: Chamberline-Kim polarization, calibrated to LC 52.30 nameplate.
@@ -203,15 +204,15 @@ ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 50 000 W/(g/s)
 # ── Supercapacitor model ───────────────────────────────────────────────────────
 # HyCap 3.8V / 250F Lithium-Ion Capacitor cells — 20P × 16S bank
 #   V_max  = 16 × 3.8  = 60.8 V
+#   V_min  = 16 × 2.5  = 40.0 V  (cell datasheet minimum: 2.5 V)
 #   C_bank = 20 × 250F / 16 = 312.5 F
-#   V_min  = 30.4 V (50 % of V_max — typical lower operating limit for LIC)
 #   ESR    ≈ (16 × 3 mΩ_cell) / 20 ≈ 2.4 mΩ  (estimated; confirm from datasheet)
 SC_C       = 312.5    # F
 SC_V_MAX   =  60.8    # V
-SC_V_MIN   =  30.4    # V   (50 % voltage → 75 % usable energy)
+SC_V_MIN   =  40.0    # V   (cell minimum 2.5 V × 16S)
 SC_ESR     = 0.0024   # Ω
-SC_ETA     = 0.97     # round-trip efficiency (lower ESR → improved converter efficiency)
-SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # ≈ 433 200 J = 120.3 Wh
+SC_ETA     = 0.97     # round-trip efficiency
+SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # ≈ 327 600 J = 91.0 Wh
 
 SC_SOC_0   = 0.60     # initial & reference SOC
 SC_SOC_MIN = 0.15     # hard floor

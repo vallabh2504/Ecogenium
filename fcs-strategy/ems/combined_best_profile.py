@@ -213,7 +213,7 @@ def make_strat_h(P_set):
     """
     Strategy H — Large-SC Optimal Constant Dispatch.
 
-    With the HyCap 120 Wh SC bank the capacitor SOC barely changes per lap, so
+    With the HyCap 91 Wh SC bank the capacitor SOC barely changes per lap, so
     SOC-feedback correction terms (LPF, PI, hysteresis) have near-zero effect.
     The optimal solution is a FIXED FC setpoint that balances energy over the race;
     the large SC absorbs every pulse/glide transient passively.
