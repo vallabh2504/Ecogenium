@@ -17,9 +17,11 @@ Public API
 ──────────
   build_demand_profile()    → (t_s, P_elec_W)  one-lap arrays at 5 Hz
   motor_eta(p_out_W)        → η  (0–1)
+  motor_lookup_2d(speed_kmh, torque_nm) → (I_dc_A, V_eff_V, eta)
   fc_current(P_net_W)       → I_fc [A]
   fc_h2_rate(I_fc)          → ṁ_H2 [g/s]
   sc_voltage(soc)           → V_sc [V]
+  sc_terminal_voltage(soc, I_sc_A) → V_sc_loaded [V]
   sc_soc_update(soc, P_sc_W, dt) → new_soc
   simulate_race(strategy_fn, SOC_0, verbose, fc_can_off) → results dict
 
@@ -31,10 +33,12 @@ Constants exported
   K_H2, LHV_H2, ETA_FC_REF, ECMS_DENOM
   N_LAPS, DT, RESAMPLE_HZ
   RESULTS_DIR
+  R_WHEEL
 """
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import RegularGridInterpolator
 import os
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -91,6 +95,38 @@ def motor_eta(p_out_W):
     """BAFANG RM G060.1000 efficiency (0–1) from shaft output power [W]."""
     return np.interp(np.maximum(p_out_W, 0.0), _M_POUT_S, _M_ETA_S,
                      left=_M_ETA_S[0], right=_M_ETA_S[-1])
+
+
+R_WHEEL = 0.295   # m — wheel radius verified against LUT (P_out = Torque × v / R)
+
+_LUT_PATH = os.path.join(_THIS_DIR, '..', 'datasheets', 'motor_lookup_table.xlsx')
+
+def _load_motor_lut():
+    df = pd.read_excel(_LUT_PATH)
+    speeds  = np.array(sorted(df['Speed_kmh'].unique()))
+    torques = np.array(sorted(df['Torque_Nm'].unique()))
+    def _interp(col):
+        mat = df.pivot(index='Torque_Nm', columns='Speed_kmh', values=col).values
+        return RegularGridInterpolator((torques, speeds), mat,
+                                       method='linear', bounds_error=False,
+                                       fill_value=None)
+    return {'eta': _interp('eta_v1_pct'),
+            'I_dc': _interp('I_dc_A'),
+            'V_eff': _interp('V_eff_V')}
+
+_MOTOR_LUT = _load_motor_lut()
+
+def motor_lookup_2d(speed_kmh, torque_nm):
+    """2D BAFANG LUT: (Speed_kmh, Torque_Nm) → (I_dc_A, V_eff_V, eta).
+    Returns zeros for zero-torque / zero-speed points (coast, stop)."""
+    spd = np.atleast_1d(np.asarray(speed_kmh, float))
+    trq = np.atleast_1d(np.asarray(torque_nm, float))
+    moving = (trq > 0.05) & (spd > 0.5)
+    pts = np.column_stack([np.clip(trq, 1., 35.), np.clip(spd, 5., 40.)])
+    I   = np.where(moving, _MOTOR_LUT['I_dc'](pts),       0.)
+    V   = np.where(moving, _MOTOR_LUT['V_eff'](pts),      0.)
+    eta = np.where(moving, _MOTOR_LUT['eta'](pts) / 100., 0.)
+    return I, V, eta
 
 
 # ── Drive-cycle demand builder ─────────────────────────────────────────────────
@@ -210,7 +246,7 @@ ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 50 000 W/(g/s)
 SC_C       = 312.5    # F
 SC_V_MAX   =  60.8    # V
 SC_V_MIN   =  40.0    # V   (cell minimum 2.5 V × 16S)
-SC_ESR     = 0.0024   # Ω
+SC_ESR     = 0.080    # Ω  — VINATech DC ESR: 100 mΩ/cell × 16S / 20P
 SC_ETA     = 0.97     # round-trip efficiency
 SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # ≈ 327 600 J = 91.0 Wh
 
@@ -222,6 +258,11 @@ def sc_voltage(soc):
     """SC terminal voltage [V] from V²-based SOC definition."""
     soc_c = np.clip(np.asarray(soc, dtype=float), 0.0, 1.0)
     return np.sqrt(SC_V_MIN**2 + soc_c * (SC_V_MAX**2 - SC_V_MIN**2))
+
+def sc_terminal_voltage(soc, I_sc_A):
+    """SC bus voltage under load: OCV(SOC) - I * SC_ESR, clamped to [V_min, V_max]."""
+    return float(np.clip(sc_voltage(soc) - float(I_sc_A) * SC_ESR,
+                         SC_V_MIN, SC_V_MAX))
 
 def sc_soc_update(soc, P_sc_W, dt):
     """
