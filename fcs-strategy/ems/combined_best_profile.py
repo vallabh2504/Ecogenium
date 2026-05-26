@@ -166,14 +166,16 @@ def fc_eta_arr(Pfc_arr):
 def make_strat_g(K_p,K_i=2.,tau=15.):
     alpha=float(np.exp(-DT/tau))
     st={'lpf':None,'integ':0.,'prev_lap':-1,'offset':0.}
-    def fn(Pd,SOC,Pp,til,li):
-        if st['lpf'] is None: st['lpf']=float(Pd)
+    def fn(I_motor,U_sc,Pp,til,li):
+        P_motor = I_motor * U_sc
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        if st['lpf'] is None: st['lpf']=float(P_motor)
         if li!=st['prev_lap'] and li>0:
             st['offset']+=0.3*(SC_SOC_0-SOC)*SC_E_J/186.
             st['offset']=float(np.clip(st['offset'],-200.,200.))
         st['prev_lap']=li
-        if Pd<5.: return 0.
-        st['lpf']=alpha*st['lpf']+(1-alpha)*float(Pd)
+        if I_motor<0.1: return 0.
+        st['lpf']=alpha*st['lpf']+(1-alpha)*float(P_motor)
         st['integ']+=(SC_SOC_0-SOC)*DT
         if K_i>1e-9: st['integ']=float(np.clip(st['integ'],-150./K_i,150./K_i))
         Pc=st['lpf']+st['offset']+K_p*(SC_SOC_0-SOC)+K_i*st['integ']
@@ -182,16 +184,20 @@ def make_strat_g(K_p,K_i=2.,tau=15.):
 
 def make_strat_constant(P_set):
     """FC at fixed setpoint when motor is on, 0 when motor is off."""
-    def fn(Pd,SOC,Pp,til,li):
-        if Pd<5.: return 0.
+    def fn(I_motor,U_sc,Pp,til,li):
+        P_motor = I_motor * U_sc
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        if I_motor<0.1: return 0.
         return float(P_set)
     return fn
 
 def make_strat_pi(K_p,K_i=2.):
     """Pure SOC-PI, no LPF feedforward."""
     st={'integ':0.}
-    def fn(Pd,SOC,Pp,til,li):
-        if Pd<5.: return 0.
+    def fn(I_motor,U_sc,Pp,til,li):
+        P_motor = I_motor * U_sc
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        if I_motor<0.1: return 0.
         st['integ']+=(SC_SOC_0-SOC)*DT
         if K_i>1e-9: st['integ']=float(np.clip(st['integ'],-150./K_i,150./K_i))
         return float(np.clip(K_p*(SC_SOC_0-SOC)+K_i*st['integ'],0.,FC_P_MAX))
@@ -200,8 +206,10 @@ def make_strat_pi(K_p,K_i=2.):
 def make_strat_rule(P_hi,band=0.05):
     """Rule-based hysteresis: high FC when SOC<SOC_ref-band, low when SOC>SOC_ref+band."""
     st={'state':'neutral'}
-    def fn(Pd,SOC,Pp,til,li):
-        if Pd<5.: return 0.
+    def fn(I_motor,U_sc,Pp,til,li):
+        P_motor = I_motor * U_sc
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        if I_motor<0.1: return 0.
         if SOC<SC_SOC_0-band: st['state']='charge'
         elif SOC>SC_SOC_0+band: st['state']='hold'
         Pout=float(np.clip(P_hi,FC_P_MIN,FC_P_MAX)) if st['state']=='charge' else FC_P_MIN
@@ -221,8 +229,10 @@ def make_strat_h(P_set):
     K_SOFT: small fixed SOC stabiliser (±50 W per 10 % SOC drift).
     """
     K_SOFT = 500.     # gentle disturbance-rejection only; not the primary balance term
-    def fn(Pd,SOC,Pp,til,li):
-        if Pd<5.: return 0.
+    def fn(I_motor,U_sc,Pp,til,li):
+        P_motor = I_motor * U_sc
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        if I_motor<0.1: return 0.
         P = P_set + K_SOFT*(SC_SOC_0-SOC)
         return float(np.clip(P,FC_P_MIN,FC_P_MAX))
     return fn
@@ -255,11 +265,11 @@ def simulate(fn,I_motor_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
     return {'m_H2':float(np.sum(mH2)),'dSOC':float(SOCa[n]-SOC0),
             'SOC':SOCa[:-1],'Pfc':Pfc,'Psc':Psc}
 
-def _bisect_param(make_fn,lo,hi,Pd,la,ca,param_name='param'):
+def _bisect_param(make_fn,lo,hi,I_m,la,ca,param_name='param'):
     best=None
     p=(lo+hi)/2.
     for it in range(25):
-        fn=make_fn(p); r=simulate(fn,Pd,la,ca)
+        fn=make_fn(p); r=simulate(fn,I_m,la,ca)
         ds=r['dSOC']
         print(f"    iter{it+1:2d}  {param_name}={p:7.1f}  dSOC={ds:+.4f}  H2={r['m_H2']:.3f}g")
         if abs(ds)<=0.015: best=r; break
@@ -270,26 +280,26 @@ def _bisect_param(make_fn,lo,hi,Pd,la,ca,param_name='param'):
     if best is None: best=r
     return p,best
 
-def bisect_kp(Pd,la,ca,label=''):
+def bisect_kp(I_m,la,ca,label=''):
     print(f"\n  Strategy G bisect K_p — '{label}'")
-    return _bisect_param(lambda kp: make_strat_g(kp), 100.,3000.,Pd,la,ca,'K_p')
+    return _bisect_param(lambda kp: make_strat_g(kp), 100.,3000.,I_m,la,ca,'K_p')
 
-def bisect_const(Pd,la,ca):
+def bisect_const(I_m,la,ca):
     print(f"\n  Constant FC bisect P_set")
-    return _bisect_param(lambda ps: make_strat_constant(ps), FC_P_MIN,FC_P_MAX,Pd,la,ca,'P_set')
+    return _bisect_param(lambda ps: make_strat_constant(ps), FC_P_MIN,FC_P_MAX,I_m,la,ca,'P_set')
 
-def bisect_pi(Pd,la,ca):
+def bisect_pi(I_m,la,ca):
     print(f"\n  PI-only bisect K_p")
-    return _bisect_param(lambda kp: make_strat_pi(kp), 100.,3000.,Pd,la,ca,'K_p')
+    return _bisect_param(lambda kp: make_strat_pi(kp), 100.,3000.,I_m,la,ca,'K_p')
 
-def bisect_rule(Pd,la,ca):
+def bisect_rule(I_m,la,ca):
     print(f"\n  Rule-based bisect P_hi")
-    return _bisect_param(lambda ph: make_strat_rule(ph), FC_P_MIN,FC_P_MAX,Pd,la,ca,'P_hi')
+    return _bisect_param(lambda ph: make_strat_rule(ph), FC_P_MIN,FC_P_MAX,I_m,la,ca,'P_hi')
 
-def bisect_h(Pd,la,ca):
+def bisect_h(I_m,la,ca):
     print(f"\n  Strategy H bisect P_set — large-SC optimal constant dispatch "
           f"(FC peak-η at {P_PEAK_ETA:.0f}W = {fc_eta(P_PEAK_ETA)*100:.1f}%)")
-    return _bisect_param(make_strat_h, FC_P_MIN,FC_P_MAX,Pd,la,ca,'P_set')
+    return _bisect_param(make_strat_h, FC_P_MIN,FC_P_MAX,I_m,la,ca,'P_set')
 
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 print("=== Combined Best Profile — 35-min constraint grid search ===")
@@ -308,7 +318,8 @@ for VH in V_HI_vals:
             if not ok:
                 print(f"  SKIP VH={VH} VL={VL} PP={PP}W  ({d:.2f}km {dur:.1f}min {stops}stops)")
                 continue
-            Kp,r = bisect_kp(Pa,la,ca,f"VH={VH} VL={VL} PP={PP}W")
+            I_m, V_eff, _ = compute_motor_signals(va, ga)
+            Kp,r = bisect_kp(I_m,la,ca,f"VH={VH} VL={VL} PP={PP}W")
             km3  = TOTAL_KM/(r['m_H2']/H2_DENSITY)
             cs   = abs(r['dSOC'])<=0.015
             results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],km3=km3,
@@ -337,25 +348,26 @@ print(f"  CSV → {csv_out}")
 
 # ── Multi-strategy comparison on best velocity profile ─────────────────────────
 print("\n=== Running additional EMS strategies on best velocity profile ===")
-Pa_b=best['Pa']; la_b=best['la']; ca_b=best['ca']
+la_b=best['la']; ca_b=best['ca']
+I_m_b, V_eff_b, _ = compute_motor_signals(best['va'], best['ga'])
 
 Kp_g=best['Kp']; r_g={'m_H2':best['H2'],'dSOC':best['dSOC'],
                        'SOC':best['SOC'],'Pfc':best['Pfc'],'Psc':best['Psc']}
 km3_g=best['km3']
 
-Ps_c, r_c = bisect_const(Pa_b,la_b,ca_b)
+Ps_c, r_c = bisect_const(I_m_b,la_b,ca_b)
 km3_c = TOTAL_KM/(r_c['m_H2']/H2_DENSITY)
 print(f"  Constant FC  P_set={Ps_c:.0f}W  H2={r_c['m_H2']:.3f}g  km/m³={km3_c:.1f}  dSOC={r_c['dSOC']:+.4f}")
 
-Kp_pi, r_pi = bisect_pi(Pa_b,la_b,ca_b)
+Kp_pi, r_pi = bisect_pi(I_m_b,la_b,ca_b)
 km3_pi = TOTAL_KM/(r_pi['m_H2']/H2_DENSITY)
 print(f"  PI-only  K_p={Kp_pi:.1f}  H2={r_pi['m_H2']:.3f}g  km/m³={km3_pi:.1f}  dSOC={r_pi['dSOC']:+.4f}")
 
-Ph_r, r_r = bisect_rule(Pa_b,la_b,ca_b)
+Ph_r, r_r = bisect_rule(I_m_b,la_b,ca_b)
 km3_r = TOTAL_KM/(r_r['m_H2']/H2_DENSITY)
 print(f"  Rule-based  P_hi={Ph_r:.0f}W  H2={r_r['m_H2']:.3f}g  km/m³={km3_r:.1f}  dSOC={r_r['dSOC']:+.4f}")
 
-Ps_h, r_h = bisect_h(Pa_b,la_b,ca_b)
+Ps_h, r_h = bisect_h(I_m_b,la_b,ca_b)
 km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
 print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
       f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
@@ -460,7 +472,7 @@ ax1p.fill_between(t1,P1,0,where=(~ca1),color='#EE7733',alpha=0.55,label='Motor o
 ax1p.fill_between(t1,P1,0,where=ca1,color='#9467BD',alpha=0.4,label='Coast/stop')
 ax1p.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls='--',alpha=0.7,label=f'FC_MIN={FC_P_MIN:.0f}W')
 ax1p.set_xlabel('Time in lap [s]',fontsize=10)
-ax1p.set_ylabel('Motor power [W]',fontsize=10)
+ax1p.set_ylabel('Motor power = I_motor × U_sc [W]',fontsize=10)
 ax1p.legend(fontsize=8,loc='upper right',framealpha=0.9)
 ax1p.set_xlim(t1[0],t1[-1])
 ax1p.spines['top'].set_visible(False); ax1p.spines['right'].set_visible(False)
