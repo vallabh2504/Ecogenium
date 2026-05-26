@@ -1,0 +1,87 @@
+Hybrid capacitors
+ 
+
+ 
+
+Notes after the Competition:
+The Hybrid Caps were used in the format explained here. The "BMS" used to monitor & protect them sadly wasn't our self built one based on the TI BQ chip, but rather a bought version that can be programmed via a horrible bluetooth app.
+In the End it all worked out though. We saw that the Hybrid Cap voltage was very load dependant and we should probably have used more of them in parallel to avoid the losses we probably had.
+
+ 
+
+ 
+
+ 
+
+Basics:
+The used capacitors for 2023/2024 were the VEL13353R8257G supplied by VinaTech. They are Lithium-Ion Capacitors (LIC), which require special effort in use, since they cannot be discharged below a certain voltage (in this case roughly 2.5V). This of course calls for a management system that prevents this. This also raises the issue of balancing, since traditional (simple) balancing of supercapacitors (like with a resistor ladder) cannot be used. This balancing is also now the task of the management system.
+
+The used Capacitors are arranged in a 16s10p configuration, which yields a 156.25F capacitor bank with a maximum voltage of roughly 60V and a minimum voltage of 40V. This voltage range perfectly fits the reuired voltage range for our motors, which allows the system layout of the inverters being directly connected to the supercapacitor voltage.
+
+ 
+
+The pack  holds - in theory - an energy of 43Wh. This is quite a large amount of energy, yet the actually usable amount is limited by the "voltage sag" caused by the series resistance.
+The resistance caused by the capacitor ISR alone is 160mOhm as per datasheet. Of course this value is much higher in reality since there are lots of parasitic capacitances along the way.
+
+ 
+
+Problems with the 23/24 solution:
+An overlooked rating of these capacitors is the maximum rated current. It is only 7.5A for the entire pack, which is not even remotely enough for a eco marathon run within the given time. That being said, we went quite a bit beyond that. This probably didn't do the capacitors any good, nor did it the internal resistance. This is also a primary reason for my remark on increasing the size or finding some other clever solution to minimize both the losses and stay inside the ratings of our precious caps.
+
+Also, the used BMS is not the nice, selfbuilt one, but a bought solution. This gives a few problems but overall, the solution is absolutely okay and might be kept this way if the new BMS doesn't get finished and tested properly in 24/25.
+
+The used model is this
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+Old notes:
+
+As we will be using Hybrid Supercapacitors in the upcoming 2023/2024 season, the Shell people (and also basic sanity instincts) want a Supercap Monitoring system, so we will implement it!
+
+ 
+
+An early system level design: (new remark: this was planned, but never implemented!)
+
+
+
+ 
+
+Notes for the self-built BMS solution:
+BQ76952 can monitor a 16-series cell pack, which is also possible to be implemented for the hybrid supercapacitor pack.
+
+ 
+
+1. TI recommends 3 Headers to connect the cells(5pin, 6pin, 5pin), try to find parts of würth to save costs (8A in the UM, but 5A may also be fine)
+
+2. 10 parallel, 16 series.
+
+3. 200, 250, 300 ohm balancing resistors to be tested.
+
+ 
+
+Knowledge of components selection:
+
+1. Schottky diodes: lower forward voltage than on junction, and switch time in 10ns, however higher leakage current. 
+
+For the external I2C with 3.3V pull-up in this case
+
+https://www.ennoid.me/bms/xlite-v4
+ 
+
+
+Power Tests 13.04.24
+Tests were done using only 3 parallel rows of 16 Caps with the xiaoxiang bms
+
+Discharge: 59.7V to 40V @ 1A -> 14Wh
+
+Discharge 59.8V to 40V @ 2.25A -> 13.2Wh
