@@ -18,7 +18,7 @@ from ems_core import (
     FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
     SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
     K_H2, fc_current, fc_h2_rate, sc_soc_update,
-    motor_eta,
+    sc_terminal_voltage, motor_lookup_2d, R_WHEEL,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
 
@@ -122,20 +122,19 @@ def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.):
         vs[ms:me]=np.clip(vs[ms:me],0.,V_MAX)
     return ta,vs,Pa,sa,la,ea,ga,ca
 
-def physics_power_demand(va, ga):
-    """Electrical power demand [W] from vehicle dynamics — same model as run_power_plot.py.
-    Includes rolling + aero + acceleration + gradient, drivetrain efficiency, and
-    BAFANG motor efficiency lookup. Applied to the P&G velocity profile."""
-    accel      = np.gradient(va, DT)
-    P_rolling  = CRR * MASS * G * va
-    P_aero     = 0.5 * CD * AF * RHO * va**3
-    P_accel    = MASS * accel * va
-    P_gradient = MASS * G * ga * va          # grade ≈ sin(angle) for small angles
-    P_wheel    = P_rolling + P_aero + P_accel + P_gradient
-    P_motor    = np.where(P_wheel > 0, P_wheel / ETA_DT, 0.)
-    eta_m      = motor_eta(P_motor)
-    P_elec     = np.where(P_motor > 0, P_motor / eta_m, 0.)
-    return np.clip(np.where(np.isfinite(P_elec), P_elec, 0.), 0., None)
+def compute_motor_signals(va, ga):
+    """Vehicle dynamics → electrical motor signals via 2D BAFANG LUT.
+    Returns I_motor [A], V_eff [V], Torque_Nm [Nm] (arrays, length=len(va)).
+    Zeros where P_wheel <= 0 (glide, coast, regen)."""
+    accel       = np.gradient(va, DT)
+    P_wheel     = (CRR*MASS*G*va + 0.5*CD*AF*RHO*va**3
+                   + MASS*accel*va + MASS*G*ga*va)
+    P_wheel_pos = np.maximum(P_wheel, 0.)
+    v_safe      = np.maximum(va, 0.3)
+    Torque_Nm   = (P_wheel_pos / v_safe) * R_WHEEL
+    Speed_kmh   = va * 3.6
+    I_dc, V_eff, _ = motor_lookup_2d(Speed_kmh, Torque_Nm)
+    return I_dc, V_eff, Torque_Nm
 
 def verify(t,v,la,silent=True):
     d=float(np.trapezoid(v,t))/1000.; dur=float(t[-1])/60.
@@ -228,25 +227,27 @@ def make_strat_h(P_set):
         return float(np.clip(P,FC_P_MIN,FC_P_MAX))
     return fn
 
-def simulate(fn,Pd_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
-    n=len(Pd_arr)
+def simulate(fn,I_motor_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
+    n=len(I_motor_arr)
     Pfc=np.empty(n);Psc=np.empty(n);SOCa=np.empty(n+1)
     Ifc=np.empty(n);mH2=np.empty(n)
     laps0=np.unique(la_arr)
     lt0={int(l):np.where(la_arr==l)[0][0] for l in laps0}
     SOCa[0]=SOC0; pp=FC_P_MIN
     for k in range(n):
-        s=SOCa[k]; Pd=float(Pd_arr[k]); li=int(la_arr[k])-1
+        s=SOCa[k]; I_m=float(I_motor_arr[k]); li=int(la_arr[k])-1
         til=float((k-lt0[li+1])*DT)
-        Pc=float(fn(Pd,s,pp,til,li))
+        U_sc=sc_terminal_voltage(s,I_m)
+        P_demand=I_m*U_sc
+        Pc=float(fn(I_m,U_sc,pp,til,li))
         Pc=float(np.clip(Pc,pp-FC_RAMP*DT,pp+FC_RAMP*DT))
-        is_coast=(bool(coast_arr[k]) if coast_arr is not None else Pd<5.)
+        is_coast=(bool(coast_arr[k]) if coast_arr is not None else I_m<0.1)
         fc_min=0. if is_coast else FC_P_MIN
         Pc=float(np.clip(Pc,fc_min,FC_P_MAX))
-        Psk=Pd-Pc
+        Psk=P_demand-Pc
         ts=sc_soc_update(s,Psk,DT)
         if Psk>0 and ts<=SC_SOC_MIN:
-            Pc=float(np.clip(Pd,FC_P_MIN,FC_P_MAX));Psk=max(0.,Pd-Pc)
+            Pc=float(np.clip(P_demand,FC_P_MIN,FC_P_MAX));Psk=max(0.,P_demand-Pc)
             ts=sc_soc_update(s,Psk,DT)
         Pfc[k]=Pc;Psc[k]=Psk;SOCa[k+1]=ts
         Ifc[k]=float(fc_current(Pc)) if Pc>=FC_P_MIN else 0.
