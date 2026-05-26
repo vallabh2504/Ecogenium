@@ -16,7 +16,7 @@ from scipy.interpolate import interp1d
 
 from ems_core import (
     FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
-    SC_E_J, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
+    SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
     K_H2, fc_current, fc_h2_rate, sc_soc_update,
     motor_eta,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
@@ -157,6 +157,8 @@ _P_ETA_TAB = np.linspace(FC_P_MIN, FC_P_MAX, 500)
 _ETA_TAB   = np.array([fc_eta(p) for p in _P_ETA_TAB])
 ETA_MAX    = float(np.max(_ETA_TAB))
 ETA_MIN    = float(np.min(_ETA_TAB[_ETA_TAB > 0]))
+# FC operating point that maximises electrical efficiency (η = P_net / (ṁH2 × LHV))
+P_PEAK_ETA = float(_P_ETA_TAB[np.argmax(_ETA_TAB)])
 
 def fc_eta_arr(Pfc_arr):
     return np.interp(Pfc_arr, _P_ETA_TAB, _ETA_TAB, left=0., right=_ETA_TAB[-1])
@@ -205,6 +207,25 @@ def make_strat_rule(P_hi,band=0.05):
         elif SOC>SC_SOC_0+band: st['state']='hold'
         Pout=float(np.clip(P_hi,FC_P_MIN,FC_P_MAX)) if st['state']=='charge' else FC_P_MIN
         return Pout
+    return fn
+
+def make_strat_h(P_set):
+    """
+    Strategy H — Large-SC Optimal Constant Dispatch.
+
+    With the HyCap 120 Wh SC bank the capacitor SOC barely changes per lap, so
+    SOC-feedback correction terms (LPF, PI, hysteresis) have near-zero effect.
+    The optimal solution is a FIXED FC setpoint that balances energy over the race;
+    the large SC absorbs every pulse/glide transient passively.
+
+    P_set: charge-sustaining FC power [W] (found by bisection).
+    K_SOFT: small fixed SOC stabiliser (±50 W per 10 % SOC drift).
+    """
+    K_SOFT = 500.     # gentle disturbance-rejection only; not the primary balance term
+    def fn(Pd,SOC,Pp,til,li):
+        if Pd<5.: return 0.
+        P = P_set + K_SOFT*(SC_SOC_0-SOC)
+        return float(np.clip(P,FC_P_MIN,FC_P_MAX))
     return fn
 
 def simulate(fn,Pd_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
@@ -263,6 +284,11 @@ def bisect_pi(Pd,la,ca):
 def bisect_rule(Pd,la,ca):
     print(f"\n  Rule-based bisect P_hi")
     return _bisect_param(lambda ph: make_strat_rule(ph), FC_P_MIN,FC_P_MAX,Pd,la,ca,'P_hi')
+
+def bisect_h(Pd,la,ca):
+    print(f"\n  Strategy H bisect P_set — large-SC optimal constant dispatch "
+          f"(FC peak-η at {P_PEAK_ETA:.0f}W = {fc_eta(P_PEAK_ETA)*100:.1f}%)")
+    return _bisect_param(make_strat_h, FC_P_MIN,FC_P_MAX,Pd,la,ca,'P_set')
 
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 print("=== Combined Best Profile — 35-min constraint grid search ===")
@@ -328,23 +354,32 @@ Ph_r, r_r = bisect_rule(Pa_b,la_b,ca_b)
 km3_r = TOTAL_KM/(r_r['m_H2']/H2_DENSITY)
 print(f"  Rule-based  P_hi={Ph_r:.0f}W  H2={r_r['m_H2']:.3f}g  km/m³={km3_r:.1f}  dSOC={r_r['dSOC']:+.4f}")
 
+Ps_h, r_h = bisect_h(Pa_b,la_b,ca_b)
+km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
+print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
+      f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
+
 strategies = [
+    dict(name='Strategy H\n(Large-SC Fixed-P)', param=f'P={Ps_h:.0f}W',
+         H2=r_h['m_H2'], km3=km3_h, dSOC=r_h['dSOC'],
+         sc_swing=float(np.max(r_h['SOC'])-np.min(r_h['SOC'])),
+         cs=abs(r_h['dSOC'])<=0.015, color='#56B4E9', Pfc=r_h['Pfc'], SOC=r_h['SOC']),
     dict(name='Strategy G\n(LPF+SOC-PI)', param=f'K_p={Kp_g:.0f}',
          H2=r_g['m_H2'], km3=km3_g, dSOC=r_g['dSOC'],
          sc_swing=float(np.max(r_g['SOC'])-np.min(r_g['SOC'])),
          cs=abs(r_g['dSOC'])<=0.015, color='#D55E00', Pfc=r_g['Pfc'], SOC=r_g['SOC']),
-    dict(name='PI Only\n(SOC-PI)', param=f'K_p={Kp_pi:.0f}',
-         H2=r_pi['m_H2'], km3=km3_pi, dSOC=r_pi['dSOC'],
-         sc_swing=float(np.max(r_pi['SOC'])-np.min(r_pi['SOC'])),
-         cs=abs(r_pi['dSOC'])<=0.015, color='#0072B2', Pfc=r_pi['Pfc'], SOC=r_pi['SOC']),
-    dict(name='Rule-Based\n(Hysteresis)', param=f'P_hi={Ph_r:.0f}W',
-         H2=r_r['m_H2'], km3=km3_r, dSOC=r_r['dSOC'],
-         sc_swing=float(np.max(r_r['SOC'])-np.min(r_r['SOC'])),
-         cs=abs(r_r['dSOC'])<=0.015, color='#009E73', Pfc=r_r['Pfc'], SOC=r_r['SOC']),
     dict(name='Constant FC\n(Fixed P_FC)', param=f'P={Ps_c:.0f}W',
          H2=r_c['m_H2'], km3=km3_c, dSOC=r_c['dSOC'],
          sc_swing=float(np.max(r_c['SOC'])-np.min(r_c['SOC'])),
          cs=abs(r_c['dSOC'])<=0.015, color='#CC79A7', Pfc=r_c['Pfc'], SOC=r_c['SOC']),
+    dict(name='Rule-Based\n(Hysteresis)', param=f'P_hi={Ph_r:.0f}W',
+         H2=r_r['m_H2'], km3=km3_r, dSOC=r_r['dSOC'],
+         sc_swing=float(np.max(r_r['SOC'])-np.min(r_r['SOC'])),
+         cs=abs(r_r['dSOC'])<=0.015, color='#009E73', Pfc=r_r['Pfc'], SOC=r_r['SOC']),
+    dict(name='PI Only\n(SOC-PI)', param=f'K_p={Kp_pi:.0f}',
+         H2=r_pi['m_H2'], km3=km3_pi, dSOC=r_pi['dSOC'],
+         sc_swing=float(np.max(r_pi['SOC'])-np.min(r_pi['SOC'])),
+         cs=abs(r_pi['dSOC'])<=0.015, color='#0072B2', Pfc=r_pi['Pfc'], SOC=r_pi['SOC']),
 ]
 
 # ── Figure ─────────────────────────────────────────────────────────────────────
@@ -435,8 +470,8 @@ ax1p.spines['top'].set_visible(False); ax1p.spines['right'].set_visible(False)
 ax2=fig.add_subplot(gs[1])
 ax2.axis('off')
 hdr=['EMS Strategy','Tuning','H₂ [g]','km/m³',
-     'Δkm/m³ vs G','ΔSOC','SC Swing','CS?']
-ref_km3=km3_g
+     'Δkm/m³ vs H','ΔSOC','SC Swing','CS?']
+ref_km3=km3_h
 rows_t=[]
 for s in strategies:
     delta=s['km3']-ref_km3
@@ -458,15 +493,15 @@ for (r,c),cell in tbl.get_celld().items():
     cell.set_width(col_widths[c] if c<len(col_widths) else 0.1)
     if r==0:
         cell.set_facecolor('#1A252F'); cell.set_text_props(color='white',fontweight='bold')
-    elif r==1:  # Strategy G (best, first row)
-        cell.set_facecolor('#FFF3CD')
+    elif r==1:  # Strategy H (new large-SC best, first row)
+        cell.set_facecolor('#E3F2FD')
         if c in(3,4): cell.set_facecolor('#D4EDDA')
     elif r%2==0: cell.set_facecolor('#F7F9FA')
     cell.set_edgecolor('#CCCCCC')
 ax2.set_title(
     f'EMS Strategy Comparison — Same Velocity Profile '
     f'(VH={best["VH"]*3.6:.1f} km/h, VL={best["VL"]*3.6:.1f} km/h, PP={best["PP"]:.0f}W)  '
-    f'— All charge-sustained',
+    f'SC: HyCap 20P×16S 3.8V/250F = {SC_E_J/3600:.0f} Wh',
     fontsize=10,fontweight='bold',pad=10)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -540,8 +575,8 @@ ax4.plot(ta_min, P_rl_all, color='#333333', lw=0.9, alpha=0.6)
 ax4.fill_between(ta_min, best['Pa'], 0, where=(~ca_b_), color='#EE7733', alpha=0.45, label='Motor cmd $P_d$ (on)')
 ax4.fill_between(ta_min, best['Pa'], 0, where=ca_b_,   color='#9467BD', alpha=0.35, label='Coast/stop')
 
-# FC power (Strategy G)
-ax4.plot(ta_min, best['Pfc'], color='#D55E00', lw=0.9, alpha=0.85, label='FC output (Strat G)')
+# FC power (Strategy H — large-SC peak-η)
+ax4.plot(ta_min, r_h['Pfc'], color='#56B4E9', lw=0.9, alpha=0.85, label='FC output (Strat H, large-SC)')
 
 # Lap markers
 for lap in range(1,N_LAPS+1):
@@ -562,8 +597,8 @@ ax4.spines['top'].set_visible(False); ax4.spines['right'].set_visible(False)
 
 fig.suptitle(
     f'Hydraix I SEM 2026 — Best Velocity Profile  |  '
-    f'km/m³={best["km3"]:.1f}  H₂={best["H2"]:.3f}g  ΔSOC={best["dSOC"]:+.4f}  '
-    f'Race: {best["ta"][-1]/60.:.1f} min  |  Natural coast → hard brake @ 5 km/h',
+    f'Strategy H km/m³={km3_h:.1f}  H₂={r_h["m_H2"]:.3f}g  ΔSOC={r_h["dSOC"]:+.4f}  '
+    f'Race: {best["ta"][-1]/60.:.1f} min  |  SC: HyCap 20P×16S {SC_E_J/3600:.0f} Wh',
     fontsize=12,fontweight='bold',y=0.995)
 
 out=os.path.join(RESULTS_DIR,'combined_best_result.png')
