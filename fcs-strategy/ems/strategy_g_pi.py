@@ -158,7 +158,7 @@ def simulate_race_g(strategy_fn, SOC_0=SC_SOC_0, verbose=False):
 
 
 # ── Strategy factory ───────────────────────────────────────────────────────────
-def make_strategy(K_p, K_i=2.0, tau=15.0):
+def make_strategy(K_p, K_i=2.0, tau=15.0, T_LAP=None, soc_glide_off=SC_SOC_0):
     """
     Create a Feedforward + SOC-PI strategy function.
 
@@ -170,6 +170,15 @@ def make_strategy(K_p, K_i=2.0, tau=15.0):
         Integral gain [W/(SOC·s)], default 2.0.
     tau : float
         LPF time constant [s], default 15.0.
+    T_LAP : float or None
+        Lap duration [s] for the lap supervisor. None → use T_LAP from
+        the canonical drive cycle (build_demand_profile()).
+    soc_glide_off : float
+        SOC threshold above which the FC is suppressed during near-zero
+        demand phases (P_dem < 25 W).  Default SC_SOC_0 (= 0.60):
+        FC is off during glide only when the SC is at or above target —
+        the FC is free to trickle-charge during glide if SOC is below
+        target, which is essential for pulse-and-glide drive cycles.
 
     State dict keys
     ---------------
@@ -178,13 +187,15 @@ def make_strategy(K_p, K_i=2.0, tau=15.0):
     P_lap_offset: float  — lap supervisor power offset [W]
     prev_lap_idx: int    — previous lap index for boundary detection
     """
-    alpha_loc = np.exp(-DT / tau)
+    alpha_loc  = np.exp(-DT / tau)
+    T_lap_eff  = T_LAP if T_LAP is not None else T_LAP
 
     state = {
         'P_filt':       None,   # initialised at start of race
         'integrator':   0.0,
         'P_lap_offset': 0.0,
         'prev_lap_idx': -1,
+        'T_lap_eff':    T_lap_eff,
     }
 
     def strategy_fn(P_dem, SOC, P_fc_prev, t_in_lap, lap_idx):
@@ -192,11 +203,17 @@ def make_strategy(K_p, K_i=2.0, tau=15.0):
         if state['P_filt'] is None:
             state['P_filt'] = P_dem
 
+        # ── Resolve T_lap_eff lazily if not provided ───────────────────────
+        if state['T_lap_eff'] is None:
+            state['T_lap_eff'] = T_LAP
+
+        T_lap_use = state['T_lap_eff'] if state['T_lap_eff'] is not None else T_LAP
+
         # ── Lap boundary detection: lap_idx changed and lap > 0 ───────────
         if lap_idx != state['prev_lap_idx'] and lap_idx > 0:
             # SOC at end of the completed lap (= current SOC at lap boundary)
             E_deficit         = (SC_SOC_0 - SOC) * SC_E_J          # J
-            state['P_lap_offset'] += K_LAP * E_deficit / T_LAP     # W
+            state['P_lap_offset'] += K_LAP * E_deficit / T_lap_use  # W
             state['P_lap_offset']  = float(np.clip(
                 state['P_lap_offset'], -200.0, 200.0))
         state['prev_lap_idx'] = lap_idx
@@ -219,8 +236,11 @@ def make_strategy(K_p, K_i=2.0, tau=15.0):
         # ── Combined command ───────────────────────────────────────────────
         P_cmd = P_filt + P_pi + state['P_lap_offset']
 
-        # True glide: FC off when demand near zero and SOC not critically low
-        if P_dem < 25.0 and SOC >= SC_SOC_0 - 0.05:
+        # Glide suppression: FC off during near-zero demand when SOC is at
+        # or above soc_glide_off.  With default soc_glide_off = SC_SOC_0,
+        # the FC is free to trickle-charge during glide while SOC < target,
+        # ensuring charge sustenance on pulse-and-glide drive cycles.
+        if P_dem < 25.0 and SOC >= soc_glide_off:
             P_cmd = 0.0
 
         P_fc = float(np.clip(P_cmd, 0.0, FC_P_MAX))
