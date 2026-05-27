@@ -17,7 +17,7 @@ from scipy.interpolate import interp1d
 from ems_core import (
     FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
     SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
-    K_H2, fc_current, fc_h2_rate, sc_soc_update,
+    K_H2, fc_current, fc_h2_rate, sc_soc_update, sc_voltage,
     sc_terminal_voltage, motor_lookup_2d, R_WHEEL,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
@@ -123,8 +123,9 @@ def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.):
     return ta,vs,Pa,sa,la,ea,ga,ca
 
 def compute_motor_signals(va, ga):
-    """Vehicle dynamics → electrical motor signals via 2D BAFANG LUT.
-    Returns I_motor [A], V_eff [V], Torque_Nm [Nm] (arrays, length=len(va)).
+    """Vehicle dynamics → electrical demand via 2D BAFANG LUT.
+    Returns P_elec [W], V_eff [V], Torque_Nm [Nm] (arrays, length=len(va)).
+    P_elec = I_dc × V_eff = true electrical power drawn from the DC bus.
     Zeros where P_wheel <= 0 (glide, coast, regen)."""
     accel       = np.gradient(va, DT)
     P_wheel     = (CRR*MASS*G*va + 0.5*CD*AF*RHO*va**3
@@ -134,7 +135,8 @@ def compute_motor_signals(va, ga):
     Torque_Nm   = (P_wheel_pos / v_safe) * R_WHEEL
     Speed_kmh   = va * 3.6
     I_dc, V_eff, _ = motor_lookup_2d(Speed_kmh, Torque_Nm)
-    return I_dc, V_eff, Torque_Nm
+    P_elec      = I_dc * V_eff   # true bus power: P_in from LUT = I_dc × V_nominal
+    return P_elec, V_eff, Torque_Nm
 
 def verify(t,v,la,silent=True):
     d=float(np.trapezoid(v,t))/1000.; dur=float(t[-1])/60.
@@ -161,6 +163,21 @@ P_PEAK_ETA = float(_P_ETA_TAB[np.argmax(_ETA_TAB)])
 
 def fc_eta_arr(Pfc_arr):
     return np.interp(Pfc_arr, _P_ETA_TAB, _ETA_TAB, left=0., right=_ETA_TAB[-1])
+
+def physics_power_demand(va, ga):
+    """Physics-based electrical power demand from velocity [m/s] and grade [-] arrays.
+    Uses the 2D motor LUT to convert wheel power to DC electrical power [W].
+    Returns zeros where vehicle is not under power (coast/stop)."""
+    accel       = np.gradient(va, DT)
+    P_wheel     = (CRR*MASS*G*va + 0.5*CD*AF*RHO*va**3
+                   + MASS*accel*va + MASS*G*ga*va)
+    P_wheel_pos = np.maximum(P_wheel, 0.)
+    v_safe      = np.maximum(va, 0.3)
+    Torque_Nm   = (P_wheel_pos / v_safe) * R_WHEEL
+    Speed_kmh   = va * 3.6
+    I_dc, V_eff, _ = motor_lookup_2d(Speed_kmh, Torque_Nm)
+    P_elec      = I_dc * V_eff
+    return P_elec
 
 # ── EMS strategies ─────────────────────────────────────────────────────────────
 def make_strat_g(K_p,K_i=2.,tau=15.):
@@ -237,18 +254,28 @@ def make_strat_h(P_set):
         return float(np.clip(P,FC_P_MIN,FC_P_MAX))
     return fn
 
-def simulate(fn,I_motor_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
-    n=len(I_motor_arr)
+def simulate(fn,P_elec_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
+    """
+    fn signature: fn(I_motor [A], U_sc [V], P_fc_prev, t_in_lap, lap_idx) -> P_fc [W]
+    P_elec_arr : precomputed electrical demand = I_dc_LUT × V_eff (from compute_motor_signals)
+    I_motor and U_sc are derived each step from P_elec and SOC, matching Simulink signals.
+    """
+    n=len(P_elec_arr)
     Pfc=np.empty(n);Psc=np.empty(n);SOCa=np.empty(n+1)
     Ifc=np.empty(n);mH2=np.empty(n)
     laps0=np.unique(la_arr)
     lt0={int(l):np.where(la_arr==l)[0][0] for l in laps0}
     SOCa[0]=SOC0; pp=FC_P_MIN
+    v_min = float(SC_V_MIN)
     for k in range(n):
-        s=SOCa[k]; I_m=float(I_motor_arr[k]); li=int(la_arr[k])-1
+        s=SOCa[k]; P_elec=float(P_elec_arr[k]); li=int(la_arr[k])-1
         til=float((k-lt0[li+1])*DT)
-        U_sc=sc_terminal_voltage(s,I_m)
-        P_demand=I_m*U_sc
+        # Derive I_motor and U_sc: actual bus current = P_elec / U_bus (2-step ESR correction)
+        U_oc = float(sc_voltage(s))                          # open-circuit voltage
+        I_m  = P_elec / max(U_oc, v_min)                    # first estimate of bus current
+        U_sc = sc_terminal_voltage(s, I_m)                  # terminal voltage with ESR sag
+        I_m  = P_elec / max(U_sc, v_min)                    # corrected bus current
+        P_demand = P_elec                                    # actual electrical demand [W]
         Pc=float(fn(I_m,U_sc,pp,til,li))
         Pc=float(np.clip(Pc,pp-FC_RAMP*DT,pp+FC_RAMP*DT))
         is_coast=(bool(coast_arr[k]) if coast_arr is not None else I_m<0.1)
@@ -265,11 +292,11 @@ def simulate(fn,I_motor_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
     return {'m_H2':float(np.sum(mH2)),'dSOC':float(SOCa[n]-SOC0),
             'SOC':SOCa[:-1],'Pfc':Pfc,'Psc':Psc}
 
-def _bisect_param(make_fn,lo,hi,I_m,la,ca,param_name='param'):
+def _bisect_param(make_fn,lo,hi,P_e,la,ca,param_name='param'):
     best=None
     p=(lo+hi)/2.
     for it in range(25):
-        fn=make_fn(p); r=simulate(fn,I_m,la,ca)
+        fn=make_fn(p); r=simulate(fn,P_e,la,ca)
         ds=r['dSOC']
         print(f"    iter{it+1:2d}  {param_name}={p:7.1f}  dSOC={ds:+.4f}  H2={r['m_H2']:.3f}g")
         if abs(ds)<=0.015: best=r; break
@@ -280,26 +307,26 @@ def _bisect_param(make_fn,lo,hi,I_m,la,ca,param_name='param'):
     if best is None: best=r
     return p,best
 
-def bisect_kp(I_m,la,ca,label=''):
+def bisect_kp(P_e,la,ca,label=''):
     print(f"\n  Strategy G bisect K_p — '{label}'")
-    return _bisect_param(lambda kp: make_strat_g(kp), 100.,3000.,I_m,la,ca,'K_p')
+    return _bisect_param(lambda kp: make_strat_g(kp), 100.,3000.,P_e,la,ca,'K_p')
 
-def bisect_const(I_m,la,ca):
+def bisect_const(P_e,la,ca):
     print(f"\n  Constant FC bisect P_set")
-    return _bisect_param(lambda ps: make_strat_constant(ps), FC_P_MIN,FC_P_MAX,I_m,la,ca,'P_set')
+    return _bisect_param(lambda ps: make_strat_constant(ps), FC_P_MIN,FC_P_MAX,P_e,la,ca,'P_set')
 
-def bisect_pi(I_m,la,ca):
+def bisect_pi(P_e,la,ca):
     print(f"\n  PI-only bisect K_p")
-    return _bisect_param(lambda kp: make_strat_pi(kp), 100.,3000.,I_m,la,ca,'K_p')
+    return _bisect_param(lambda kp: make_strat_pi(kp), 100.,3000.,P_e,la,ca,'K_p')
 
-def bisect_rule(I_m,la,ca):
+def bisect_rule(P_e,la,ca):
     print(f"\n  Rule-based bisect P_hi")
-    return _bisect_param(lambda ph: make_strat_rule(ph), FC_P_MIN,FC_P_MAX,I_m,la,ca,'P_hi')
+    return _bisect_param(lambda ph: make_strat_rule(ph), FC_P_MIN,FC_P_MAX,P_e,la,ca,'P_hi')
 
-def bisect_h(I_m,la,ca):
+def bisect_h(P_e,la,ca):
     print(f"\n  Strategy H bisect P_set — large-SC optimal constant dispatch "
           f"(FC peak-η at {P_PEAK_ETA:.0f}W = {fc_eta(P_PEAK_ETA)*100:.1f}%)")
-    return _bisect_param(make_strat_h, FC_P_MIN,FC_P_MAX,I_m,la,ca,'P_set')
+    return _bisect_param(make_strat_h, FC_P_MIN,FC_P_MAX,P_e,la,ca,'P_set')
 
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 print("=== Combined Best Profile — 35-min constraint grid search ===")
@@ -318,8 +345,8 @@ for VH in V_HI_vals:
             if not ok:
                 print(f"  SKIP VH={VH} VL={VL} PP={PP}W  ({d:.2f}km {dur:.1f}min {stops}stops)")
                 continue
-            I_m, V_eff, _ = compute_motor_signals(va, ga)
-            Kp,r = bisect_kp(I_m,la,ca,f"VH={VH} VL={VL} PP={PP}W")
+            P_e, V_eff, _ = compute_motor_signals(va, ga)
+            Kp,r = bisect_kp(P_e,la,ca,f"VH={VH} VL={VL} PP={PP}W")
             km3  = TOTAL_KM/(r['m_H2']/H2_DENSITY)
             cs   = abs(r['dSOC'])<=0.015
             results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],km3=km3,
@@ -349,25 +376,25 @@ print(f"  CSV → {csv_out}")
 # ── Multi-strategy comparison on best velocity profile ─────────────────────────
 print("\n=== Running additional EMS strategies on best velocity profile ===")
 la_b=best['la']; ca_b=best['ca']
-I_m_b, V_eff_b, _ = compute_motor_signals(best['va'], best['ga'])
+P_e_b, V_eff_b, _ = compute_motor_signals(best['va'], best['ga'])
 
 Kp_g=best['Kp']; r_g={'m_H2':best['H2'],'dSOC':best['dSOC'],
                        'SOC':best['SOC'],'Pfc':best['Pfc'],'Psc':best['Psc']}
 km3_g=best['km3']
 
-Ps_c, r_c = bisect_const(I_m_b,la_b,ca_b)
+Ps_c, r_c = bisect_const(P_e_b,la_b,ca_b)
 km3_c = TOTAL_KM/(r_c['m_H2']/H2_DENSITY)
 print(f"  Constant FC  P_set={Ps_c:.0f}W  H2={r_c['m_H2']:.3f}g  km/m³={km3_c:.1f}  dSOC={r_c['dSOC']:+.4f}")
 
-Kp_pi, r_pi = bisect_pi(I_m_b,la_b,ca_b)
+Kp_pi, r_pi = bisect_pi(P_e_b,la_b,ca_b)
 km3_pi = TOTAL_KM/(r_pi['m_H2']/H2_DENSITY)
 print(f"  PI-only  K_p={Kp_pi:.1f}  H2={r_pi['m_H2']:.3f}g  km/m³={km3_pi:.1f}  dSOC={r_pi['dSOC']:+.4f}")
 
-Ph_r, r_r = bisect_rule(I_m_b,la_b,ca_b)
+Ph_r, r_r = bisect_rule(P_e_b,la_b,ca_b)
 km3_r = TOTAL_KM/(r_r['m_H2']/H2_DENSITY)
 print(f"  Rule-based  P_hi={Ph_r:.0f}W  H2={r_r['m_H2']:.3f}g  km/m³={km3_r:.1f}  dSOC={r_r['dSOC']:+.4f}")
 
-Ps_h, r_h = bisect_h(I_m_b,la_b,ca_b)
+Ps_h, r_h = bisect_h(P_e_b,la_b,ca_b)
 km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
 print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
       f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
