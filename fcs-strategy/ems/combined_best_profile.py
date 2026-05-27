@@ -12,7 +12,7 @@ import matplotlib.gridspec as mgridspec
 import matplotlib.colors as mcolors
 import matplotlib.cm as mcm
 from scipy.signal import savgol_filter
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, RegularGridInterpolator
 
 from ems_core import (
     FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
@@ -254,6 +254,43 @@ def make_strat_h(P_set):
         return float(np.clip(P,FC_P_MIN,FC_P_MAX))
     return fn
 
+def make_strat_a(K_soc, P_base=200.):
+    """
+    Strategy A — 2D Lookup Table EMS.
+
+    Maps (u = (P_motor − P_fc_prev) / SC_E_J, SOC) → P_fc [W] via bilinear
+    interpolation on a 21×18 pre-built table.
+
+    K_soc  : SOC feedback gain [W per unit SOC], bisected for charge sustenance.
+    P_base : mean motor-on demand [W], feedforward term (sets FC at SOC=SOC_0).
+    K_rate : rate feedforward for |u| > deadband (rarely activates with large SC).
+    """
+    u_grid   = np.linspace(-0.050, 0.050, 21)
+    soc_grid = np.linspace(0.10, 0.95, 18)
+    K_rate   = 500.0
+    deadband = 0.020
+    TABLE = np.zeros((21, 18))
+    for i, u_i in enumerate(u_grid):
+        for j, soc_j in enumerate(soc_grid):
+            delta_soc  = K_soc * (SC_SOC_0 - soc_j)
+            delta_rate = (K_rate * (abs(u_i) - deadband) * np.sign(u_i)
+                          if abs(u_i) > deadband else 0.0)
+            TABLE[i, j] = float(np.clip(P_base + delta_soc + delta_rate,
+                                        FC_P_MIN, FC_P_MAX))
+    _interp = RegularGridInterpolator(
+        (u_grid, soc_grid), TABLE,
+        method='linear', bounds_error=False, fill_value=None
+    )
+    def fn(I_motor, U_sc, Pp, til, li):
+        P_motor = I_motor * U_sc
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        if I_motor < 0.1:
+            return 0.
+        u     = float(np.clip((P_motor - Pp) / SC_E_J, u_grid[0], u_grid[-1]))
+        soc_c = float(np.clip(SOC, soc_grid[0], soc_grid[-1]))
+        return float(_interp([[u, soc_c]])[0])
+    return fn
+
 def simulate(fn,P_elec_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
     """
     fn signature: fn(I_motor [A], U_sc [V], P_fc_prev, t_in_lap, lap_idx) -> P_fc [W]
@@ -328,6 +365,20 @@ def bisect_h(P_e,la,ca):
           f"(FC peak-η at {P_PEAK_ETA:.0f}W = {fc_eta(P_PEAK_ETA)*100:.1f}%)")
     return _bisect_param(make_strat_h, FC_P_MIN,FC_P_MAX,P_e,la,ca,'P_set')
 
+def bisect_a(P_e,la,ca):
+    print(f"\n  Strategy A bisect K_soc (2D LUT)")
+    # P_base must account for the FC_P_MIN=100W floor that simulate() applies
+    # during glide phases (ca=False, I_motor≈0): energy balance requires
+    #   P_base × T_motor_on + FC_P_MIN × T_floor = E_motor_total
+    ca_bool = ca.astype(bool)
+    T_motor_on = float(np.sum(P_e > 10.) * DT)
+    T_floor    = float(np.sum((P_e <= 10.) & ~ca_bool) * DT)
+    E_motor    = float(np.sum(P_e) * DT)
+    P_base     = float(np.clip((E_motor - FC_P_MIN * T_floor) / max(T_motor_on, 1.),
+                               FC_P_MIN, FC_P_MAX))
+    print(f"    P_base={P_base:.1f}W  (motor-on {T_motor_on:.0f}s, glide-floor {T_floor:.0f}s × {FC_P_MIN:.0f}W)")
+    return _bisect_param(lambda ks: make_strat_a(ks, P_base), 50.,600.,P_e,la,ca,'K_soc')
+
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 print("=== Combined Best Profile — 35-min constraint grid search ===")
 V_HI_vals = [8.5, 9.0]
@@ -399,6 +450,10 @@ km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
 print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
       f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
 
+Ks_a, r_a = bisect_a(P_e_b,la_b,ca_b)
+km3_a = TOTAL_KM/(r_a['m_H2']/H2_DENSITY)
+print(f"  Strategy A  K_soc={Ks_a:.1f}  H2={r_a['m_H2']:.3f}g  km/m³={km3_a:.1f}  dSOC={r_a['dSOC']:+.4f}")
+
 strategies = [
     dict(name='Strategy H\n(Large-SC Fixed-P)', param=f'P={Ps_h:.0f}W',
          H2=r_h['m_H2'], km3=km3_h, dSOC=r_h['dSOC'],
@@ -420,6 +475,10 @@ strategies = [
          H2=r_pi['m_H2'], km3=km3_pi, dSOC=r_pi['dSOC'],
          sc_swing=float(np.max(r_pi['SOC'])-np.min(r_pi['SOC'])),
          cs=abs(r_pi['dSOC'])<=0.015, color='#0072B2', Pfc=r_pi['Pfc'], SOC=r_pi['SOC']),
+    dict(name='Strategy A\n(2D LUT)', param=f'K_soc={Ks_a:.0f}',
+         H2=r_a['m_H2'], km3=km3_a, dSOC=r_a['dSOC'],
+         sc_swing=float(np.max(r_a['SOC'])-np.min(r_a['SOC'])),
+         cs=abs(r_a['dSOC'])<=0.015, color='#E69F00', Pfc=r_a['Pfc'], SOC=r_a['SOC']),
 ]
 
 # ── Figure ─────────────────────────────────────────────────────────────────────
