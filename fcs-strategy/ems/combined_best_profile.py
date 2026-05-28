@@ -182,6 +182,7 @@ def physics_power_demand(va, ga):
 # ── EMS strategies ─────────────────────────────────────────────────────────────
 def make_strat_g(K_p,K_i=2.,tau=15.):
     alpha=float(np.exp(-DT/tau))
+    G_FC_MIN = FC_P_MIN  # Strategy G floor — FC never below FC_P_MIN (100W)
     st={'lpf':None,'integ':0.,'prev_lap':-1,'offset':0.}
     def fn(I_motor,U_sc,Pp,til,li):
         P_motor = I_motor * U_sc
@@ -192,13 +193,13 @@ def make_strat_g(K_p,K_i=2.,tau=15.):
             st['offset']=float(np.clip(st['offset'],-200.,200.))
         st['prev_lap']=li
         # Integral always accumulates — coast/glide SOC excess builds negative correction
-        # that reduces pulse-phase FC output to compensate for 100W floor energy
+        # that reduces pulse-phase FC output to compensate for floor energy
         st['integ']+=(SC_SOC_0-SOC)*DT
         if K_i>1e-9: st['integ']=float(np.clip(st['integ'],-150./K_i,150./K_i))
-        if I_motor<0.1: return float(FC_P_MIN)  # FC stays warm at minimum, never cold-starts
+        if I_motor<0.1: return G_FC_MIN  # FC stays warm at 150W minimum
         st['lpf']=alpha*st['lpf']+(1-alpha)*float(P_motor)
         Pc=st['lpf']+st['offset']+K_p*(SC_SOC_0-SOC)+K_i*st['integ']
-        return float(np.clip(Pc,FC_P_MIN,FC_P_MAX))
+        return float(np.clip(Pc,G_FC_MIN,FC_P_MAX))
     return fn
 
 def make_strat_constant(P_set):
