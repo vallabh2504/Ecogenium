@@ -181,6 +181,7 @@ def physics_power_demand(va, ga):
 
 # ── EMS strategies ─────────────────────────────────────────────────────────────
 def make_strat_g(K_p,K_i=2.,tau=15.):
+    alpha=float(np.exp(-DT/tau))
     st={'lpf':None,'integ':0.,'prev_lap':-1,'offset':0.}
     def fn(I_motor,U_sc,Pp,til,li):
         P_motor = I_motor * U_sc
@@ -190,21 +191,14 @@ def make_strat_g(K_p,K_i=2.,tau=15.):
             st['offset']+=0.3*(SC_SOC_0-SOC)*SC_E_J/186.
             st['offset']=float(np.clip(st['offset'],-200.,200.))
         st['prev_lap']=li
-        if I_motor<0.1: return 0.
-        # ALFC: fast tau when motor is pulling, slow tau during light-load glide
-        tau_now = tau if I_motor > 2. else 40.
-        alpha_now = float(np.exp(-DT / tau_now))
-        st['lpf']=alpha_now*st['lpf']+(1-alpha_now)*float(P_motor)
-        # EWI: weight integral by distance from peak-η; pushes setpoint toward 120W peak
-        eta_now = fc_eta(st['lpf'])
-        w = max(1.0, ETA_MAX / eta_now) if eta_now > 0.01 else 1.0
-        st['integ']+=(SC_SOC_0-SOC)*DT*w
+        # Integral always accumulates — coast/glide SOC excess builds negative correction
+        # that reduces pulse-phase FC output to compensate for 100W floor energy
+        st['integ']+=(SC_SOC_0-SOC)*DT
         if K_i>1e-9: st['integ']=float(np.clip(st['integ'],-150./K_i,150./K_i))
+        if I_motor<0.1: return float(FC_P_MIN)  # FC stays warm at minimum, never cold-starts
+        st['lpf']=alpha*st['lpf']+(1-alpha)*float(P_motor)
         Pc=st['lpf']+st['offset']+K_p*(SC_SOC_0-SOC)+K_i*st['integ']
-        # GEB: reduce output when entering glide with SC already above reference
-        if I_motor < 0.5 and SOC > SC_SOC_0 + 0.03:
-            Pc *= 0.85
-        return float(np.clip(Pc,0.,FC_P_MAX))
+        return float(np.clip(Pc,FC_P_MIN,FC_P_MAX))
     return fn
 
 def make_strat_constant(P_set):
@@ -354,7 +348,7 @@ def _bisect_param(make_fn,lo,hi,P_e,la,ca,param_name='param'):
 
 def bisect_kp(P_e,la,ca,label=''):
     print(f"\n  Strategy G bisect K_p — '{label}'")
-    return _bisect_param(lambda kp: make_strat_g(kp), 100.,3000.,P_e,la,ca,'K_p')
+    return _bisect_param(lambda kp: make_strat_g(kp), 100.,8000.,P_e,la,ca,'K_p')
 
 def bisect_const(P_e,la,ca):
     print(f"\n  Constant FC bisect P_set")
