@@ -6,7 +6,7 @@ Race:    Silesia Ring SEM 2026, 11 laps × 14.5 km, ~35 min (3.18 min/lap)
 
 Supercapacitor module: HyCap 3.8V / 250F LIC cells, 20 parallel × 16 series
   V_max = 60.8 V,  V_min = 40.0 V (cell min 2.5 V × 16S),  C_bank = 312.5 F
-  E_sc ≈ 91.0 Wh,  ESR ≈ 2.4 mΩ.
+  E_sc ≈ 91.0 Wh,  ESR ≈ 80 mΩ  (100 mΩ/cell × 16S / 20P).
   (mini-caps 2.7V / 50F not modelled — role in circuit TBD)
 
 FC model: Chamberline-Kim polarization, calibrated to LC 52.30 nameplate.
