@@ -27,6 +27,7 @@
 ```
 SIM/
 ├── README.md                          ← you are here
+├── run_test.py                        ← isolation test: confirms folder is self-contained ★
 │
 ├── datasheets/                        ← physical hardware reference documents
 │   ├── motor_lookup_table.xlsx        ← BAFANG 2D efficiency map (PRIMARY INPUT)
@@ -42,7 +43,9 @@ SIM/
 │   ├── grid_search_extended.py        ← VH/VL/PP optimisation grid search
 │   └── profile_comparison.py          ← benchmark three driving profiles
 │
-├── models/                            ← component models
+├── models/                            ← standalone component models (importable independently)
+│   ├── motor_model.py                 ← BAFANG 2D LUT: motor_lookup_2d(), motor_eta(), R_WHEEL ★
+│   ├── supercap_model.py              ← SC bank model: sc_voltage(), sc_soc_update(), constants ★
 │   └── FuelCellEstimate_v3.py         ← FC polarisation curve model (LC52.30)
 │
 ├── strategies/                        ← standalone strategy reference scripts
@@ -87,16 +90,18 @@ SIM/
 
 | File | Role | Run directly? |
 |------|------|---------------|
-| `ems_core.py` | Physics foundation. Defines all constants, loads motor LUT, implements `sc_voltage()`, `sc_terminal_voltage()`, `sc_soc_update()`, `fc_current()`, `fc_h2_rate()`, `motor_lookup_2d()`. **Import this, never run directly.** | No |
-| `combined_best_profile.py` | **Main simulation.** Builds P&G velocity profiles via `build_profile()`, converts to motor electrical signals via `compute_motor_signals()`, runs all 6 EMS strategies via `simulate()`, finds best (VH, VL, PP) combination. Outputs `sem_combined_best.csv` and `combined_best_result.png`. | `python3 combined_best_profile.py` |
-| `grid_search_extended.py` | Extends the P&G grid to VH ∈ [7–9.5 m/s], VL ∈ [5.5–8 m/s], PP ∈ [400–700 W]. Imports from `combined_best_profile.py`. Generates `grid_search_extended.png` heatmap. | `python3 grid_search_extended.py` |
+| `ems_core.py` | Physics foundation. Defines all constants, loads motor LUT, implements `sc_voltage()`, `sc_terminal_voltage()`, `sc_soc_update()`, `fc_current()`, `fc_h2_rate()`, `motor_lookup_2d()`. Paths fixed for SIM folder: `MATLAB_DIR→../data/`, `RESULTS_DIR→../plots/`. **Import this, never run directly.** | No |
+| `combined_best_profile.py` | **Main simulation.** Builds P&G velocity profiles via `build_profile()`, converts to motor electrical signals via `compute_motor_signals()`, runs all 6 EMS strategies via `simulate()`, finds best (VH, VL, PP) combination. Outputs `data/sem_combined_best.csv` and `plots/combined_best_result.png`. Wrapped in `if __name__ == '__main__':` so it can be imported as a module. | `python3 combined_best_profile.py` |
+| `grid_search_extended.py` | Extends the P&G grid to VH ∈ [7–9.5 m/s], VL ∈ [5.5–8 m/s], PP ∈ [400–700 W]. Imports from `combined_best_profile.py`. Generates `plots/grid_search_extended.png` heatmap. | `python3 grid_search_extended.py` |
 | `profile_comparison.py` | Benchmarks 3 driving profiles (Python P&G, MATLAB elev-aware, canonical telemetry) with identical Strategy G. Useful for A/B testing new profiles. | `python3 profile_comparison.py` |
 
 ### models/
 
 | File | Description |
 |------|-------------|
-| `FuelCellEstimate_v3.py` | Electrochemical model of the Horizon LC52.30. Fits the polarisation curve (V = OCV − R_int × I − η_act) to measured data. Outputs `fc_voltage(I)`, `fc_power(I)`, `fc_h2_rate(I)`. The fitted coefficients are hardcoded into `ems_core.py` as `_FC_I`, `_FC_V`, `_FC_H2` arrays (61-point lookup tables). |
+| `motor_model.py` | **Standalone 2D motor LUT.** Loads `datasheets/motor_lookup_table.xlsx` and exposes `motor_lookup_2d(speed_kmh, torque_nm) → (I_dc_A, V_eff_V, eta)`, `motor_eta(p_out_W)` (1D fallback), and `R_WHEEL = 0.295 m`. Import directly without needing `ems_core`. |
+| `supercap_model.py` | **Standalone SC bank model.** Exports all SC constants (`SC_C`, `SC_V_MAX`, `SC_V_MIN`, `SC_ESR`, `SC_E_J`, `SC_SOC_0`, `SC_SOC_MIN`, `SC_SOC_MAX`) and three functions: `sc_voltage(soc)`, `sc_terminal_voltage(soc, I_A)`, `sc_soc_update(soc, P_W, dt)`. Import directly without needing `ems_core`. |
+| `FuelCellEstimate_v3.py` | Electrochemical model of the Horizon LC52.30. Fits the polarisation curve (V = OCV − R_int × I − η_act) to measured data. Outputs `fc_voltage(I)`, `fc_power(I)`, `fc_h2_rate(I)`. The fitted coefficients are hardcoded into `ems_core.py` as the `_P_TAB` / `_I_TAB` inversion arrays. |
 
 ### strategies/
 
@@ -327,6 +332,29 @@ SIM/
 pip install numpy scipy pandas matplotlib openpyxl
 ```
 
+### Verify the folder is self-contained (run this first)
+
+```bash
+cd SIM
+python3 run_test.py
+```
+
+This script:
+- Verifies all imports resolve inside SIM/ with zero external dependencies
+- Spot-checks motor LUT and SC model outputs
+- Builds the best P&G profile and runs 5 strategies (B/C/D/A/G)
+- Prints a results table and consistency checks
+
+Expected output (all PASS, all charge-sustaining):
+```
+  Strategy           km/m³    H2[g]      dSOC   CS?
+  G  LPF+PI+150W     211.4    6.164   +0.0078   YES ★
+  D  Const-FC        210.1    6.203   -0.0119   YES
+  A  2D-LUT          206.7    6.306   +0.0062   YES
+  C  Strat-H         206.2    6.320   +0.0079   YES
+  B  Rule-FSM        205.1    6.354   +0.0138   YES
+```
+
 ### Run the main simulation
 
 ```bash
@@ -359,18 +387,28 @@ python3 profile_comparison.py
 
 Compares 3 profiles with Strategy G. Outputs `../plots/profile_comparison.png`.
 
+### Use the standalone model files
+
+```python
+# From any script inside SIM/ — no ems_core needed
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'models'))
+from motor_model import motor_lookup_2d, R_WHEEL
+from supercap_model import sc_voltage, sc_terminal_voltage, SC_E_J, SC_SOC_0
+```
+
 ### Important path note
 
-`ems_core.py` uses relative paths to find `datasheets/`. When running from
-`SIM/scripts/`, add the following to the top of any new script:
+All scripts inside `SIM/scripts/` use paths relative to their own location:
+- `../datasheets/` → `SIM/datasheets/` ✓
+- `../data/`       → `SIM/data/`       ✓  (fixed from original `../matlab/`)
+- `../plots/`      → `SIM/plots/`      ✓  (fixed from original `../results/ems/`)
 
+When writing new scripts, always start with:
 ```python
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 ```
-
-The original `ems_core.py` points to `../datasheets/` relative to its own
-location. If you move scripts, update `_THIS_DIR` in `ems_core.py`.
 
 ---
 
