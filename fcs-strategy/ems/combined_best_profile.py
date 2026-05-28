@@ -381,327 +381,328 @@ def bisect_a(P_e,la,ca):
     return _bisect_param(lambda ks: make_strat_a(ks, P_base), 50.,600.,P_e,la,ca,'K_soc')
 
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
-print("=== Combined Best Profile — 35-min constraint grid search ===")
-V_HI_vals = [8.5, 9.0]
-V_LO_vals = [6.0, 6.5, 7.0]
-P_PU_vals = [500., 550., 600.]
-V_DH      = 9.0
+if __name__ == '__main__':
+    print("=== Combined Best Profile — 35-min constraint grid search ===")
+    V_HI_vals = [8.5, 9.0]
+    V_LO_vals = [6.0, 6.5, 7.0]
+    P_PU_vals = [500., 550., 600.]
+    V_DH      = 9.0
 
-results = []
-for VH in V_HI_vals:
-    for VL in V_LO_vals:
-        if VL >= VH-1.5: continue
-        for PP in P_PU_vals:
-            ta,va,Pa,sa,la,ea,ga,ca = build_profile(VH,VL,V_DH,PP,1000.)
-            ok,d,dur,stops = verify(ta,va,la)
-            if not ok:
-                print(f"  SKIP VH={VH} VL={VL} PP={PP}W  ({d:.2f}km {dur:.1f}min {stops}stops)")
-                continue
-            P_e, V_eff, _ = compute_motor_signals(va, ga)
-            Kp,r = bisect_kp(P_e,la,ca,f"VH={VH} VL={VL} PP={PP}W")
-            km3  = TOTAL_KM/(r['m_H2']/H2_DENSITY)
-            cs   = abs(r['dSOC'])<=0.015
-            results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],km3=km3,
-                                dSOC=r['dSOC'],cs=cs,
-                                ta=ta,va=va,Pa=Pa,sa=sa,la=la,ea=ea,ga=ga,ca=ca,
-                                SOC=r['SOC'],Pfc=r['Pfc'],Psc=r['Psc']))
-            print(f"  >>> VH={VH} VL={VL} PP={PP}W  km3={km3:.1f}  H2={r['m_H2']:.3f}g  dSOC={r['dSOC']:+.4f}  CS={'YES' if cs else 'NO'}")
+    results = []
+    for VH in V_HI_vals:
+        for VL in V_LO_vals:
+            if VL >= VH-1.5: continue
+            for PP in P_PU_vals:
+                ta,va,Pa,sa,la,ea,ga,ca = build_profile(VH,VL,V_DH,PP,1000.)
+                ok,d,dur,stops = verify(ta,va,la)
+                if not ok:
+                    print(f"  SKIP VH={VH} VL={VL} PP={PP}W  ({d:.2f}km {dur:.1f}min {stops}stops)")
+                    continue
+                P_e, V_eff, _ = compute_motor_signals(va, ga)
+                Kp,r = bisect_kp(P_e,la,ca,f"VH={VH} VL={VL} PP={PP}W")
+                km3  = TOTAL_KM/(r['m_H2']/H2_DENSITY)
+                cs   = abs(r['dSOC'])<=0.015
+                results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],km3=km3,
+                                    dSOC=r['dSOC'],cs=cs,
+                                    ta=ta,va=va,Pa=Pa,sa=sa,la=la,ea=ea,ga=ga,ca=ca,
+                                    SOC=r['SOC'],Pfc=r['Pfc'],Psc=r['Psc']))
+                print(f"  >>> VH={VH} VL={VL} PP={PP}W  km3={km3:.1f}  H2={r['m_H2']:.3f}g  dSOC={r['dSOC']:+.4f}  CS={'YES' if cs else 'NO'}")
 
-if not results:
-    raise RuntimeError("All profiles failed verify. Adjust grid or verify bounds.")
+    if not results:
+        raise RuntimeError("All profiles failed verify. Adjust grid or verify bounds.")
 
-best = max(results, key=lambda x: x['km3'])
-_,dur_best,_,_ = verify(best['ta'],best['va'],best['la'],silent=False)
-print(f"\n=== COMBINED BEST ===")
-print(f"  V_HIGH={best['VH']} m/s ({best['VH']*3.6:.1f}km/h)  V_LOW={best['VL']} m/s  PP={best['PP']}W")
-print(f"  K_p={best['Kp']:.1f}  H2={best['H2']:.3f}g  km/m³={best['km3']:.1f}  dSOC={best['dSOC']:+.4f}")
+    best = max(results, key=lambda x: x['km3'])
+    _,dur_best,_,_ = verify(best['ta'],best['va'],best['la'],silent=False)
+    print(f"\n=== COMBINED BEST ===")
+    print(f"  V_HIGH={best['VH']} m/s ({best['VH']*3.6:.1f}km/h)  V_LOW={best['VL']} m/s  PP={best['PP']}W")
+    print(f"  K_p={best['Kp']:.1f}  H2={best['H2']:.3f}g  km/m³={best['km3']:.1f}  dSOC={best['dSOC']:+.4f}")
 
-# ── Save CSV ───────────────────────────────────────────────────────────────────
-df_out=pd.DataFrame({'time_s':best['ta'],'velocity_ms':best['va'],
-    'velocity_kmh':best['va']*3.6,'dist_in_lap_m':best['sa'],
-    'lap_num':best['la'],'elevation_m':best['ea'],'grade':best['ga'],
-    'P_elec_W':best['Pa']})
-csv_out=os.path.join(MATLAB_DIR,'sem_combined_best.csv')
-df_out.to_csv(csv_out,index=False)
-print(f"  CSV → {csv_out}")
+    # ── Save CSV ───────────────────────────────────────────────────────────────────
+    df_out=pd.DataFrame({'time_s':best['ta'],'velocity_ms':best['va'],
+        'velocity_kmh':best['va']*3.6,'dist_in_lap_m':best['sa'],
+        'lap_num':best['la'],'elevation_m':best['ea'],'grade':best['ga'],
+        'P_elec_W':best['Pa']})
+    csv_out=os.path.join(MATLAB_DIR,'sem_combined_best.csv')
+    df_out.to_csv(csv_out,index=False)
+    print(f"  CSV → {csv_out}")
 
-# ── Multi-strategy comparison on best velocity profile ─────────────────────────
-print("\n=== Running additional EMS strategies on best velocity profile ===")
-la_b=best['la']; ca_b=best['ca']
-P_e_b, V_eff_b, _ = compute_motor_signals(best['va'], best['ga'])
+    # ── Multi-strategy comparison on best velocity profile ─────────────────────────
+    print("\n=== Running additional EMS strategies on best velocity profile ===")
+    la_b=best['la']; ca_b=best['ca']
+    P_e_b, V_eff_b, _ = compute_motor_signals(best['va'], best['ga'])
 
-Kp_g=best['Kp']; r_g={'m_H2':best['H2'],'dSOC':best['dSOC'],
-                       'SOC':best['SOC'],'Pfc':best['Pfc'],'Psc':best['Psc']}
-km3_g=best['km3']
+    Kp_g=best['Kp']; r_g={'m_H2':best['H2'],'dSOC':best['dSOC'],
+                           'SOC':best['SOC'],'Pfc':best['Pfc'],'Psc':best['Psc']}
+    km3_g=best['km3']
 
-Ps_c, r_c = bisect_const(P_e_b,la_b,ca_b)
-km3_c = TOTAL_KM/(r_c['m_H2']/H2_DENSITY)
-print(f"  Constant FC  P_set={Ps_c:.0f}W  H2={r_c['m_H2']:.3f}g  km/m³={km3_c:.1f}  dSOC={r_c['dSOC']:+.4f}")
+    Ps_c, r_c = bisect_const(P_e_b,la_b,ca_b)
+    km3_c = TOTAL_KM/(r_c['m_H2']/H2_DENSITY)
+    print(f"  Constant FC  P_set={Ps_c:.0f}W  H2={r_c['m_H2']:.3f}g  km/m³={km3_c:.1f}  dSOC={r_c['dSOC']:+.4f}")
 
-Kp_pi, r_pi = bisect_pi(P_e_b,la_b,ca_b)
-km3_pi = TOTAL_KM/(r_pi['m_H2']/H2_DENSITY)
-print(f"  PI-only  K_p={Kp_pi:.1f}  H2={r_pi['m_H2']:.3f}g  km/m³={km3_pi:.1f}  dSOC={r_pi['dSOC']:+.4f}")
+    Kp_pi, r_pi = bisect_pi(P_e_b,la_b,ca_b)
+    km3_pi = TOTAL_KM/(r_pi['m_H2']/H2_DENSITY)
+    print(f"  PI-only  K_p={Kp_pi:.1f}  H2={r_pi['m_H2']:.3f}g  km/m³={km3_pi:.1f}  dSOC={r_pi['dSOC']:+.4f}")
 
-Ph_r, r_r = bisect_rule(P_e_b,la_b,ca_b)
-km3_r = TOTAL_KM/(r_r['m_H2']/H2_DENSITY)
-print(f"  Rule-based  P_hi={Ph_r:.0f}W  H2={r_r['m_H2']:.3f}g  km/m³={km3_r:.1f}  dSOC={r_r['dSOC']:+.4f}")
+    Ph_r, r_r = bisect_rule(P_e_b,la_b,ca_b)
+    km3_r = TOTAL_KM/(r_r['m_H2']/H2_DENSITY)
+    print(f"  Rule-based  P_hi={Ph_r:.0f}W  H2={r_r['m_H2']:.3f}g  km/m³={km3_r:.1f}  dSOC={r_r['dSOC']:+.4f}")
 
-Ps_h, r_h = bisect_h(P_e_b,la_b,ca_b)
-km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
-print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
-      f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
+    Ps_h, r_h = bisect_h(P_e_b,la_b,ca_b)
+    km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
+    print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
+          f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
 
-Ks_a, r_a = bisect_a(P_e_b,la_b,ca_b)
-km3_a = TOTAL_KM/(r_a['m_H2']/H2_DENSITY)
-print(f"  Strategy A  K_soc={Ks_a:.1f}  H2={r_a['m_H2']:.3f}g  km/m³={km3_a:.1f}  dSOC={r_a['dSOC']:+.4f}")
+    Ks_a, r_a = bisect_a(P_e_b,la_b,ca_b)
+    km3_a = TOTAL_KM/(r_a['m_H2']/H2_DENSITY)
+    print(f"  Strategy A  K_soc={Ks_a:.1f}  H2={r_a['m_H2']:.3f}g  km/m³={km3_a:.1f}  dSOC={r_a['dSOC']:+.4f}")
 
-strategies = [
-    dict(name='Strategy H\n(Large-SC Fixed-P)', param=f'P={Ps_h:.0f}W',
-         H2=r_h['m_H2'], km3=km3_h, dSOC=r_h['dSOC'],
-         sc_swing=float(np.max(r_h['SOC'])-np.min(r_h['SOC'])),
-         cs=abs(r_h['dSOC'])<=0.015, color='#56B4E9', Pfc=r_h['Pfc'], SOC=r_h['SOC']),
-    dict(name='Strategy G\n(LPF+SOC-PI)', param=f'K_p={Kp_g:.0f}',
-         H2=r_g['m_H2'], km3=km3_g, dSOC=r_g['dSOC'],
-         sc_swing=float(np.max(r_g['SOC'])-np.min(r_g['SOC'])),
-         cs=abs(r_g['dSOC'])<=0.015, color='#D55E00', Pfc=r_g['Pfc'], SOC=r_g['SOC']),
-    dict(name='Constant FC\n(Fixed P_FC)', param=f'P={Ps_c:.0f}W',
-         H2=r_c['m_H2'], km3=km3_c, dSOC=r_c['dSOC'],
-         sc_swing=float(np.max(r_c['SOC'])-np.min(r_c['SOC'])),
-         cs=abs(r_c['dSOC'])<=0.015, color='#CC79A7', Pfc=r_c['Pfc'], SOC=r_c['SOC']),
-    dict(name='Rule-Based\n(Hysteresis)', param=f'P_hi={Ph_r:.0f}W',
-         H2=r_r['m_H2'], km3=km3_r, dSOC=r_r['dSOC'],
-         sc_swing=float(np.max(r_r['SOC'])-np.min(r_r['SOC'])),
-         cs=abs(r_r['dSOC'])<=0.015, color='#009E73', Pfc=r_r['Pfc'], SOC=r_r['SOC']),
-    dict(name='PI Only\n(SOC-PI)', param=f'K_p={Kp_pi:.0f}',
-         H2=r_pi['m_H2'], km3=km3_pi, dSOC=r_pi['dSOC'],
-         sc_swing=float(np.max(r_pi['SOC'])-np.min(r_pi['SOC'])),
-         cs=abs(r_pi['dSOC'])<=0.015, color='#0072B2', Pfc=r_pi['Pfc'], SOC=r_pi['SOC']),
-    dict(name='Strategy A\n(2D LUT)', param=f'K_soc={Ks_a:.0f}',
-         H2=r_a['m_H2'], km3=km3_a, dSOC=r_a['dSOC'],
-         sc_swing=float(np.max(r_a['SOC'])-np.min(r_a['SOC'])),
-         cs=abs(r_a['dSOC'])<=0.015, color='#E69F00', Pfc=r_a['Pfc'], SOC=r_a['SOC']),
-]
+    strategies = [
+        dict(name='Strategy H\n(Large-SC Fixed-P)', param=f'P={Ps_h:.0f}W',
+             H2=r_h['m_H2'], km3=km3_h, dSOC=r_h['dSOC'],
+             sc_swing=float(np.max(r_h['SOC'])-np.min(r_h['SOC'])),
+             cs=abs(r_h['dSOC'])<=0.015, color='#56B4E9', Pfc=r_h['Pfc'], SOC=r_h['SOC']),
+        dict(name='Strategy G\n(LPF+SOC-PI)', param=f'K_p={Kp_g:.0f}',
+             H2=r_g['m_H2'], km3=km3_g, dSOC=r_g['dSOC'],
+             sc_swing=float(np.max(r_g['SOC'])-np.min(r_g['SOC'])),
+             cs=abs(r_g['dSOC'])<=0.015, color='#D55E00', Pfc=r_g['Pfc'], SOC=r_g['SOC']),
+        dict(name='Constant FC\n(Fixed P_FC)', param=f'P={Ps_c:.0f}W',
+             H2=r_c['m_H2'], km3=km3_c, dSOC=r_c['dSOC'],
+             sc_swing=float(np.max(r_c['SOC'])-np.min(r_c['SOC'])),
+             cs=abs(r_c['dSOC'])<=0.015, color='#CC79A7', Pfc=r_c['Pfc'], SOC=r_c['SOC']),
+        dict(name='Rule-Based\n(Hysteresis)', param=f'P_hi={Ph_r:.0f}W',
+             H2=r_r['m_H2'], km3=km3_r, dSOC=r_r['dSOC'],
+             sc_swing=float(np.max(r_r['SOC'])-np.min(r_r['SOC'])),
+             cs=abs(r_r['dSOC'])<=0.015, color='#009E73', Pfc=r_r['Pfc'], SOC=r_r['SOC']),
+        dict(name='PI Only\n(SOC-PI)', param=f'K_p={Kp_pi:.0f}',
+             H2=r_pi['m_H2'], km3=km3_pi, dSOC=r_pi['dSOC'],
+             sc_swing=float(np.max(r_pi['SOC'])-np.min(r_pi['SOC'])),
+             cs=abs(r_pi['dSOC'])<=0.015, color='#0072B2', Pfc=r_pi['Pfc'], SOC=r_pi['SOC']),
+        dict(name='Strategy A\n(2D LUT)', param=f'K_soc={Ks_a:.0f}',
+             H2=r_a['m_H2'], km3=km3_a, dSOC=r_a['dSOC'],
+             sc_swing=float(np.max(r_a['SOC'])-np.min(r_a['SOC'])),
+             cs=abs(r_a['dSOC'])<=0.015, color='#E69F00', Pfc=r_a['Pfc'], SOC=r_a['SOC']),
+    ]
 
-# ── Figure ─────────────────────────────────────────────────────────────────────
-# Lap 1 mask
-m1   = best['la']==1
-t1   = best['ta'][m1]-best['ta'][m1][0]
-v1   = best['va'][m1]*3.6
-P1   = best['Pa'][m1]
-g1   = best['ga'][m1]
-e1   = best['ea'][m1]
-ca1  = best['ca'][m1]
-Pfc1 = best['Pfc'][m1]
+    # ── Figure ─────────────────────────────────────────────────────────────────────
+    # Lap 1 mask
+    m1   = best['la']==1
+    t1   = best['ta'][m1]-best['ta'][m1][0]
+    v1   = best['va'][m1]*3.6
+    P1   = best['Pa'][m1]
+    g1   = best['ga'][m1]
+    e1   = best['ea'][m1]
+    ca1  = best['ca'][m1]
+    Pfc1 = best['Pfc'][m1]
 
-# Segment colours
-GRADE_THRESH=0.006
-def seg_col(P,g,v,is_coast):
-    if v==0.: return '#222222'
-    if is_coast: return '#9467BD'
-    if g<-GRADE_THRESH: return '#0072B2'
-    if g>+GRADE_THRESH: return '#CC3311'
-    return '#EE7733' if P>10. else '#009E73'
+    # Segment colours
+    GRADE_THRESH=0.006
+    def seg_col(P,g,v,is_coast):
+        if v==0.: return '#222222'
+        if is_coast: return '#9467BD'
+        if g<-GRADE_THRESH: return '#0072B2'
+        if g>+GRADE_THRESH: return '#CC3311'
+        return '#EE7733' if P>10. else '#009E73'
 
-cols1=[seg_col(P1[i],g1[i],v1[i],bool(ca1[i])) for i in range(len(v1))]
+    cols1=[seg_col(P1[i],g1[i],v1[i],bool(ca1[i])) for i in range(len(v1))]
 
-# FC efficiency colourmap (red→green)
-_cmap_rg = mcolors.LinearSegmentedColormap.from_list('rg',['#D62728','#FF7F0E','#2CA02C'])
-_norm_eta = mcolors.Normalize(vmin=ETA_MIN*0.9, vmax=ETA_MAX)
+    # FC efficiency colourmap (red→green)
+    _cmap_rg = mcolors.LinearSegmentedColormap.from_list('rg',['#D62728','#FF7F0E','#2CA02C'])
+    _norm_eta = mcolors.Normalize(vmin=ETA_MIN*0.9, vmax=ETA_MAX)
 
-def eta_color(P):
-    e = fc_eta(P)
-    return _cmap_rg(_norm_eta(e)) if P>=FC_P_MIN else (0.6,0.6,0.6,0.4)
+    def eta_color(P):
+        e = fc_eta(P)
+        return _cmap_rg(_norm_eta(e)) if P>=FC_P_MIN else (0.6,0.6,0.6,0.4)
 
-fig=plt.figure(figsize=(18,24),dpi=150)
-fig.patch.set_facecolor('white')
-gs=mgridspec.GridSpec(4,1,figure=fig,hspace=0.52,
-    height_ratios=[2.2,1.6,2.0,1.8])
+    fig=plt.figure(figsize=(18,24),dpi=150)
+    fig.patch.set_facecolor('white')
+    gs=mgridspec.GridSpec(4,1,figure=fig,hspace=0.52,
+        height_ratios=[2.2,1.6,2.0,1.8])
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Panel 1 — Lap 1 detail: velocity+elevation (top) + motor power (bottom)
-# ══════════════════════════════════════════════════════════════════════════════
-gs1=mgridspec.GridSpecFromSubplotSpec(2,1,subplot_spec=gs[0],hspace=0.08,
-    height_ratios=[1.6,1.0])
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Panel 1 — Lap 1 detail: velocity+elevation (top) + motor power (bottom)
+    # ══════════════════════════════════════════════════════════════════════════════
+    gs1=mgridspec.GridSpecFromSubplotSpec(2,1,subplot_spec=gs[0],hspace=0.08,
+        height_ratios=[1.6,1.0])
 
-ax1v=fig.add_subplot(gs1[0])   # velocity + elevation
-ax1e=ax1v.twinx()              # elevation right axis
-ax1p=fig.add_subplot(gs1[1],sharex=ax1v)  # motor power
+    ax1v=fig.add_subplot(gs1[0])   # velocity + elevation
+    ax1e=ax1v.twinx()              # elevation right axis
+    ax1p=fig.add_subplot(gs1[1],sharex=ax1v)  # motor power
 
-# Velocity coloured by mode
-for i in range(len(t1)-1):
-    ax1v.plot(t1[i:i+2],v1[i:i+2],color=cols1[i],lw=1.8)
-ax1v.axhline(best['VH']*3.6,color='grey',lw=0.9,ls='--',alpha=0.5,label=f"V_HI={best['VH']*3.6:.1f}")
-ax1v.axhline(best['VL']*3.6,color='grey',lw=0.9,ls=':',alpha=0.5,label=f"V_LO={best['VL']*3.6:.1f}")
-ax1v.set_ylabel('Velocity [km/h]',fontsize=10)
-ax1v.set_title(
-    f"Lap 1 — Velocity, Elevation & Motor Power  |  "
-    f"V_HI={best['VH']*3.6:.1f} km/h  V_LO={best['VL']*3.6:.1f} km/h  "
-    f"P_PULSE={best['PP']:.0f} W  V_DH={V_DH*3.6:.1f} km/h",
-    fontsize=10,fontweight='bold')
-# Elevation fill on right axis
-ax1e.fill_between(t1,e1,np.min(e1),color='#BB3311',alpha=0.12)
-ax1e.plot(t1,e1,color='#BB3311',lw=0.9,alpha=0.55)
-ax1e.set_ylabel('Elevation [m]',fontsize=9,color='#BB3311')
-ax1e.tick_params(axis='y',labelcolor='#BB3311',labelsize=8)
-ax1v.set_zorder(ax1e.get_zorder()+1); ax1v.patch.set_visible(False)
-patches_leg=[
-    mpatches.Patch(color='#CC3311',label='Uphill boost'),
-    mpatches.Patch(color='#0072B2',label='Downhill glide'),
-    mpatches.Patch(color='#EE7733',label='Flat pulse'),
-    mpatches.Patch(color='#009E73',label='Flat glide'),
-    mpatches.Patch(color='#9467BD',label='Coast-to-stop'),
-    mpatches.Patch(color='#222222',label='Stop')]
-ax1v.legend(handles=patches_leg,fontsize=8,loc='upper right',ncol=3,framealpha=0.9)
-plt.setp(ax1v.get_xticklabels(),visible=False)
+    # Velocity coloured by mode
+    for i in range(len(t1)-1):
+        ax1v.plot(t1[i:i+2],v1[i:i+2],color=cols1[i],lw=1.8)
+    ax1v.axhline(best['VH']*3.6,color='grey',lw=0.9,ls='--',alpha=0.5,label=f"V_HI={best['VH']*3.6:.1f}")
+    ax1v.axhline(best['VL']*3.6,color='grey',lw=0.9,ls=':',alpha=0.5,label=f"V_LO={best['VL']*3.6:.1f}")
+    ax1v.set_ylabel('Velocity [km/h]',fontsize=10)
+    ax1v.set_title(
+        f"Lap 1 — Velocity, Elevation & Motor Power  |  "
+        f"V_HI={best['VH']*3.6:.1f} km/h  V_LO={best['VL']*3.6:.1f} km/h  "
+        f"P_PULSE={best['PP']:.0f} W  V_DH={V_DH*3.6:.1f} km/h",
+        fontsize=10,fontweight='bold')
+    # Elevation fill on right axis
+    ax1e.fill_between(t1,e1,np.min(e1),color='#BB3311',alpha=0.12)
+    ax1e.plot(t1,e1,color='#BB3311',lw=0.9,alpha=0.55)
+    ax1e.set_ylabel('Elevation [m]',fontsize=9,color='#BB3311')
+    ax1e.tick_params(axis='y',labelcolor='#BB3311',labelsize=8)
+    ax1v.set_zorder(ax1e.get_zorder()+1); ax1v.patch.set_visible(False)
+    patches_leg=[
+        mpatches.Patch(color='#CC3311',label='Uphill boost'),
+        mpatches.Patch(color='#0072B2',label='Downhill glide'),
+        mpatches.Patch(color='#EE7733',label='Flat pulse'),
+        mpatches.Patch(color='#009E73',label='Flat glide'),
+        mpatches.Patch(color='#9467BD',label='Coast-to-stop'),
+        mpatches.Patch(color='#222222',label='Stop')]
+    ax1v.legend(handles=patches_leg,fontsize=8,loc='upper right',ncol=3,framealpha=0.9)
+    plt.setp(ax1v.get_xticklabels(),visible=False)
 
-# Motor power (electrical demand) vs time
-ax1p.fill_between(t1,P1,0,where=(~ca1),color='#EE7733',alpha=0.55,label='Motor on')
-ax1p.fill_between(t1,P1,0,where=ca1,color='#9467BD',alpha=0.4,label='Coast/stop')
-ax1p.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls='--',alpha=0.7,label=f'FC_MIN={FC_P_MIN:.0f}W')
-ax1p.set_xlabel('Time in lap [s]',fontsize=10)
-ax1p.set_ylabel('Motor power = I_motor × U_sc [W]',fontsize=10)
-ax1p.legend(fontsize=8,loc='upper right',framealpha=0.9)
-ax1p.set_xlim(t1[0],t1[-1])
-ax1p.spines['top'].set_visible(False); ax1p.spines['right'].set_visible(False)
+    # Motor power (electrical demand) vs time
+    ax1p.fill_between(t1,P1,0,where=(~ca1),color='#EE7733',alpha=0.55,label='Motor on')
+    ax1p.fill_between(t1,P1,0,where=ca1,color='#9467BD',alpha=0.4,label='Coast/stop')
+    ax1p.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls='--',alpha=0.7,label=f'FC_MIN={FC_P_MIN:.0f}W')
+    ax1p.set_xlabel('Time in lap [s]',fontsize=10)
+    ax1p.set_ylabel('Motor power = I_motor × U_sc [W]',fontsize=10)
+    ax1p.legend(fontsize=8,loc='upper right',framealpha=0.9)
+    ax1p.set_xlim(t1[0],t1[-1])
+    ax1p.spines['top'].set_visible(False); ax1p.spines['right'].set_visible(False)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Panel 2 — EMS strategy comparison table
-# ══════════════════════════════════════════════════════════════════════════════
-ax2=fig.add_subplot(gs[1])
-ax2.axis('off')
-hdr=['EMS Strategy','Tuning','H₂ [g]','km/m³',
-     'Δkm/m³ vs H','ΔSOC','SC Swing','CS?']
-ref_km3=km3_h
-rows_t=[]
-for s in strategies:
-    delta=s['km3']-ref_km3
-    sgn='+' if delta>=0 else ''
-    rows_t.append([
-        s['name'], s['param'],
-        f"{s['H2']:.3f}",
-        f"{s['km3']:.1f}",
-        f"{sgn}{delta:.1f}" if abs(delta)>0.05 else '—',
-        f"{s['dSOC']:+.4f}",
-        f"{s['sc_swing']:.3f}",
-        '✓' if s['cs'] else '✗',
-    ])
-tbl=ax2.table(cellText=rows_t,colLabels=hdr,cellLoc='center',loc='center',
-              bbox=[0,0,1,1])
-tbl.auto_set_font_size(False); tbl.set_fontsize(9.5)
-col_widths=[0.20,0.12,0.09,0.09,0.13,0.10,0.10,0.07]
-for (r,c),cell in tbl.get_celld().items():
-    cell.set_width(col_widths[c] if c<len(col_widths) else 0.1)
-    if r==0:
-        cell.set_facecolor('#1A252F'); cell.set_text_props(color='white',fontweight='bold')
-    elif r==1:  # Strategy H (new large-SC best, first row)
-        cell.set_facecolor('#E3F2FD')
-        if c in(3,4): cell.set_facecolor('#D4EDDA')
-    elif r%2==0: cell.set_facecolor('#F7F9FA')
-    cell.set_edgecolor('#CCCCCC')
-ax2.set_title(
-    f'EMS Strategy Comparison — Same Velocity Profile '
-    f'(VH={best["VH"]*3.6:.1f} km/h, VL={best["VL"]*3.6:.1f} km/h, PP={best["PP"]:.0f}W)  '
-    f'SC: HyCap 20P×16S 3.8V/250F = {SC_E_J/3600:.0f} Wh',
-    fontsize=10,fontweight='bold',pad=10)
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Panel 2 — EMS strategy comparison table
+    # ══════════════════════════════════════════════════════════════════════════════
+    ax2=fig.add_subplot(gs[1])
+    ax2.axis('off')
+    hdr=['EMS Strategy','Tuning','H₂ [g]','km/m³',
+         'Δkm/m³ vs H','ΔSOC','SC Swing','CS?']
+    ref_km3=km3_h
+    rows_t=[]
+    for s in strategies:
+        delta=s['km3']-ref_km3
+        sgn='+' if delta>=0 else ''
+        rows_t.append([
+            s['name'], s['param'],
+            f"{s['H2']:.3f}",
+            f"{s['km3']:.1f}",
+            f"{sgn}{delta:.1f}" if abs(delta)>0.05 else '—',
+            f"{s['dSOC']:+.4f}",
+            f"{s['sc_swing']:.3f}",
+            '✓' if s['cs'] else '✗',
+        ])
+    tbl=ax2.table(cellText=rows_t,colLabels=hdr,cellLoc='center',loc='center',
+                  bbox=[0,0,1,1])
+    tbl.auto_set_font_size(False); tbl.set_fontsize(9.5)
+    col_widths=[0.20,0.12,0.09,0.09,0.13,0.10,0.10,0.07]
+    for (r,c),cell in tbl.get_celld().items():
+        cell.set_width(col_widths[c] if c<len(col_widths) else 0.1)
+        if r==0:
+            cell.set_facecolor('#1A252F'); cell.set_text_props(color='white',fontweight='bold')
+        elif r==1:  # Strategy H (new large-SC best, first row)
+            cell.set_facecolor('#E3F2FD')
+            if c in(3,4): cell.set_facecolor('#D4EDDA')
+        elif r%2==0: cell.set_facecolor('#F7F9FA')
+        cell.set_edgecolor('#CCCCCC')
+    ax2.set_title(
+        f'EMS Strategy Comparison — Same Velocity Profile '
+        f'(VH={best["VH"]*3.6:.1f} km/h, VL={best["VL"]*3.6:.1f} km/h, PP={best["PP"]:.0f}W)  '
+        f'SC: HyCap 20P×16S 3.8V/250F = {SC_E_J/3600:.0f} Wh',
+        fontsize=10,fontweight='bold',pad=10)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Panel 3 — Physics-based road load + FC efficiency (Lap 1)
-# ══════════════════════════════════════════════════════════════════════════════
-ax3=fig.add_subplot(gs[2])
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Panel 3 — Physics-based road load + FC efficiency (Lap 1)
+    # ══════════════════════════════════════════════════════════════════════════════
+    ax3=fig.add_subplot(gs[2])
 
-# Road-load power computed from actual v(t) and grade(t) — this is what
-# vehicle dynamics truly demand to maintain current speed at each instant.
-va1   = best['va'][m1]          # velocity [m/s]
-ga1   = best['ga'][m1]          # grade [-]
-P_rl1 = physics_power_demand(va1, ga1)   # physics-based [W electrical]
-Psc1  = best['Psc'][m1]
+    # Road-load power computed from actual v(t) and grade(t) — this is what
+    # vehicle dynamics truly demand to maintain current speed at each instant.
+    va1   = best['va'][m1]          # velocity [m/s]
+    ga1   = best['ga'][m1]          # grade [-]
+    P_rl1 = physics_power_demand(va1, ga1)   # physics-based [W electrical]
+    Psc1  = best['Psc'][m1]
 
-# Road-load power (smooth, velocity-dependent) — the physical truth
-ax3.fill_between(t1, P_rl1, 0, alpha=0.18, color='#222222',
-                 label='Vehicle dynamics $P_{elec}(v,a,g)$\n(rolling+aero+accel+grad+motor η)')
-ax3.plot(t1, P_rl1, color='#222222', lw=1.3, alpha=0.8)
+    # Road-load power (smooth, velocity-dependent) — the physical truth
+    ax3.fill_between(t1, P_rl1, 0, alpha=0.18, color='#222222',
+                     label='Vehicle dynamics $P_{elec}(v,a,g)$\n(rolling+aero+accel+grad+motor η)')
+    ax3.plot(t1, P_rl1, color='#222222', lw=1.3, alpha=0.8)
 
-# Commanded motor electrical power (P&G step — what EMS actually sees as demand)
-ax3.plot(t1, P1, color='#888888', lw=1.0, ls='--', alpha=0.7, label='Commanded $P_d$ (P&G step)')
+    # Commanded motor electrical power (P&G step — what EMS actually sees as demand)
+    ax3.plot(t1, P1, color='#888888', lw=1.0, ls='--', alpha=0.7, label='Commanded $P_d$ (P&G step)')
 
-# SC discharge (+) / charge (−) shading
-ax3.fill_between(t1, Psc1, 0, where=(Psc1>0), color='#0072B2', alpha=0.22, label='SC discharge')
-ax3.fill_between(t1, Psc1, 0, where=(Psc1<0), color='#CC79A7', alpha=0.22, label='SC charge (FC surplus)')
+    # SC discharge (+) / charge (−) shading
+    ax3.fill_between(t1, Psc1, 0, where=(Psc1>0), color='#0072B2', alpha=0.22, label='SC discharge')
+    ax3.fill_between(t1, Psc1, 0, where=(Psc1<0), color='#CC79A7', alpha=0.22, label='SC charge (FC surplus)')
 
-# FC power colour-coded by efficiency (red=low η → green=peak η)
-for i in range(len(t1)-1):
-    c = eta_color(Pfc1[i])
-    ax3.plot(t1[i:i+2], Pfc1[i:i+2], color=c, lw=2.4)
+    # FC power colour-coded by efficiency (red=low η → green=peak η)
+    for i in range(len(t1)-1):
+        c = eta_color(Pfc1[i])
+        ax3.plot(t1[i:i+2], Pfc1[i:i+2], color=c, lw=2.4)
 
-# Colourbar
-sm=mcm.ScalarMappable(cmap=_cmap_rg,norm=_norm_eta)
-sm.set_array([])
-cbar=fig.colorbar(sm,ax=ax3,orientation='vertical',fraction=0.018,pad=0.01)
-cbar.set_label('FC efficiency η [—]',fontsize=9)
-cbar.ax.tick_params(labelsize=8)
+    # Colourbar
+    sm=mcm.ScalarMappable(cmap=_cmap_rg,norm=_norm_eta)
+    sm.set_array([])
+    cbar=fig.colorbar(sm,ax=ax3,orientation='vertical',fraction=0.018,pad=0.01)
+    cbar.set_label('FC efficiency η [—]',fontsize=9)
+    cbar.ax.tick_params(labelsize=8)
 
-ax3.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls=':',alpha=0.7,label=f'FC_MIN={FC_P_MIN:.0f}W')
-ax3.axhline(0,color='#333333',lw=0.6,ls='-',alpha=0.3)
-ax3.set_xlabel('Time in lap [s]',fontsize=10)
-ax3.set_ylabel('Power [W]',fontsize=10)
-ax3.set_title(
-    'Power Breakdown — Lap 1  |  Vehicle-dynamics $P_{elec}(v,a,g)$ (rolling+aero+accel+grad+motor η) '
-    'vs commanded $P_d$ (P&G)  |  FC colour = efficiency',
-    fontsize=9,fontweight='bold')
-ax3.legend(fontsize=8,loc='upper right',framealpha=0.9,ncol=2)
-ax3.set_xlim(t1[0],t1[-1])
-ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
+    ax3.axhline(FC_P_MIN,color='#009E73',lw=0.8,ls=':',alpha=0.7,label=f'FC_MIN={FC_P_MIN:.0f}W')
+    ax3.axhline(0,color='#333333',lw=0.6,ls='-',alpha=0.3)
+    ax3.set_xlabel('Time in lap [s]',fontsize=10)
+    ax3.set_ylabel('Power [W]',fontsize=10)
+    ax3.set_title(
+        'Power Breakdown — Lap 1  |  Vehicle-dynamics $P_{elec}(v,a,g)$ (rolling+aero+accel+grad+motor η) '
+        'vs commanded $P_d$ (P&G)  |  FC colour = efficiency',
+        fontsize=9,fontweight='bold')
+    ax3.legend(fontsize=8,loc='upper right',framealpha=0.9,ncol=2)
+    ax3.set_xlim(t1[0],t1[-1])
+    ax3.spines['top'].set_visible(False); ax3.spines['right'].set_visible(False)
 
-eta1=fc_eta_arr(Pfc1); eta_on=eta1[Pfc1>=FC_P_MIN]
-if len(eta_on):
-    ax3.annotate(f"FC η: {eta_on.min()*100:.1f}–{eta_on.max()*100:.1f}%",
-                 xy=(0.02,0.93),xycoords='axes fraction',fontsize=9,
-                 color='#333333',fontweight='bold')
+    eta1=fc_eta_arr(Pfc1); eta_on=eta1[Pfc1>=FC_P_MIN]
+    if len(eta_on):
+        ax3.annotate(f"FC η: {eta_on.min()*100:.1f}–{eta_on.max()*100:.1f}%",
+                     xy=(0.02,0.93),xycoords='axes fraction',fontsize=9,
+                     color='#333333',fontweight='bold')
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Panel 4 — Full-race motor power (road-load) with FC overlay, all 11 laps
-# ══════════════════════════════════════════════════════════════════════════════
-ax4=fig.add_subplot(gs[3])
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Panel 4 — Full-race motor power (road-load) with FC overlay, all 11 laps
+    # ══════════════════════════════════════════════════════════════════════════════
+    ax4=fig.add_subplot(gs[3])
 
-ta_min  = best['ta']/60.
-ca_b_   = best['ca']
-P_rl_all = physics_power_demand(best['va'], best['ga'])   # physics, full race
+    ta_min  = best['ta']/60.
+    ca_b_   = best['ca']
+    P_rl_all = physics_power_demand(best['va'], best['ga'])   # physics, full race
 
-ax4.fill_between(ta_min, P_rl_all, 0, color='#222222', alpha=0.15,
-                 label='Vehicle dynamics $P_{elec}(v,a,g)$')
-ax4.plot(ta_min, P_rl_all, color='#333333', lw=0.9, alpha=0.6)
+    ax4.fill_between(ta_min, P_rl_all, 0, color='#222222', alpha=0.15,
+                     label='Vehicle dynamics $P_{elec}(v,a,g)$')
+    ax4.plot(ta_min, P_rl_all, color='#333333', lw=0.9, alpha=0.6)
 
-# Commanded motor power (P&G square wave)
-ax4.fill_between(ta_min, best['Pa'], 0, where=(~ca_b_), color='#EE7733', alpha=0.45, label='Motor cmd $P_d$ (on)')
-ax4.fill_between(ta_min, best['Pa'], 0, where=ca_b_,   color='#9467BD', alpha=0.35, label='Coast/stop')
+    # Commanded motor power (P&G square wave)
+    ax4.fill_between(ta_min, best['Pa'], 0, where=(~ca_b_), color='#EE7733', alpha=0.45, label='Motor cmd $P_d$ (on)')
+    ax4.fill_between(ta_min, best['Pa'], 0, where=ca_b_,   color='#9467BD', alpha=0.35, label='Coast/stop')
 
-# FC power (Strategy H — large-SC peak-η)
-ax4.plot(ta_min, r_h['Pfc'], color='#56B4E9', lw=0.9, alpha=0.85, label='FC output (Strat H, large-SC)')
+    # FC power (Strategy H — large-SC peak-η)
+    ax4.plot(ta_min, r_h['Pfc'], color='#56B4E9', lw=0.9, alpha=0.85, label='FC output (Strat H, large-SC)')
 
-# Lap markers
-for lap in range(1,N_LAPS+1):
-    idx=np.where(best['la']==lap)[0][0]
-    lt=best['ta'][idx]/60.
-    ax4.axvline(lt,color='#444444',lw=0.6,ls=':',alpha=0.4)
-    ax4.text(lt+0.05,max(P_rl_all)*1.02,f'L{lap}',fontsize=7,color='#555555',va='bottom')
+    # Lap markers
+    for lap in range(1,N_LAPS+1):
+        idx=np.where(best['la']==lap)[0][0]
+        lt=best['ta'][idx]/60.
+        ax4.axvline(lt,color='#444444',lw=0.6,ls=':',alpha=0.4)
+        ax4.text(lt+0.05,max(P_rl_all)*1.02,f'L{lap}',fontsize=7,color='#555555',va='bottom')
 
-ax4.set_xlabel('Race time [min]',fontsize=10)
-ax4.set_ylabel('Power [W]',fontsize=10)
-ax4.set_title(
-    f'Full-Race Power — Road-load (physics) vs Motor command (P&G) vs FC output  '
-    f'({best["ta"][-1]/60.:.1f} min, 11 laps)',
-    fontsize=10,fontweight='bold')
-ax4.legend(fontsize=8.5,loc='upper right',framealpha=0.9,ncol=2)
-ax4.set_xlim(0,best['ta'][-1]/60.)
-ax4.spines['top'].set_visible(False); ax4.spines['right'].set_visible(False)
+    ax4.set_xlabel('Race time [min]',fontsize=10)
+    ax4.set_ylabel('Power [W]',fontsize=10)
+    ax4.set_title(
+        f'Full-Race Power — Road-load (physics) vs Motor command (P&G) vs FC output  '
+        f'({best["ta"][-1]/60.:.1f} min, 11 laps)',
+        fontsize=10,fontweight='bold')
+    ax4.legend(fontsize=8.5,loc='upper right',framealpha=0.9,ncol=2)
+    ax4.set_xlim(0,best['ta'][-1]/60.)
+    ax4.spines['top'].set_visible(False); ax4.spines['right'].set_visible(False)
 
-fig.suptitle(
-    f'Hydraix I SEM 2026 — Best Velocity Profile  |  '
-    f'Strategy H km/m³={km3_h:.1f}  H₂={r_h["m_H2"]:.3f}g  ΔSOC={r_h["dSOC"]:+.4f}  '
-    f'Race: {best["ta"][-1]/60.:.1f} min  |  SC: HyCap 20P×16S {SC_E_J/3600:.0f} Wh',
-    fontsize=12,fontweight='bold',y=0.995)
+    fig.suptitle(
+        f'Hydraix I SEM 2026 — Best Velocity Profile  |  '
+        f'Strategy H km/m³={km3_h:.1f}  H₂={r_h["m_H2"]:.3f}g  ΔSOC={r_h["dSOC"]:+.4f}  '
+        f'Race: {best["ta"][-1]/60.:.1f} min  |  SC: HyCap 20P×16S {SC_E_J/3600:.0f} Wh',
+        fontsize=12,fontweight='bold',y=0.995)
 
-out=os.path.join(RESULTS_DIR,'combined_best_result.png')
-fig.savefig(out,dpi=150,bbox_inches='tight',facecolor='white')
-plt.close(fig)
-print(f"\nFigure → {out}")
+    out=os.path.join(RESULTS_DIR,'combined_best_result.png')
+    fig.savefig(out,dpi=150,bbox_inches='tight',facecolor='white')
+    plt.close(fig)
+    print(f"\nFigure → {out}")
