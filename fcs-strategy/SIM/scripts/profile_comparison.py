@@ -22,19 +22,19 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as mgridspec
 
 from ems_core import (
-    FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
-    SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_ESR, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
+    FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2, ETA_DCDC,
+    SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_ESR, SC_ETA, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
     K_H2, fc_current, sc_soc_update, sc_voltage, sc_terminal_voltage,
     motor_lookup_2d, R_WHEEL,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
 
-# ── Vehicle constants (from combined_best_profile.py) ──────────────────────────
-MASS    = 170.
+# ── Vehicle constants (must match combined_best_profile.py) ────────────────────
+MASS    = 175.
 G       = 9.81
-CRR     = 0.003
-CD      = 0.25
-AF      = 0.5
+CRR     = 0.006
+CD      = 0.15
+AF      = 0.8
 RHO     = 1.225
 H2_DENSITY = 0.0899       # kg/m³ at STP
 TOTAL_KM   = 14.5         # total race distance [km]
@@ -138,13 +138,14 @@ def simulate_from_arrays(fn, va, ga, la, ca):
         fc_min   = 0. if is_coast else FC_P_MIN
         Pc = float(np.clip(Pc, fc_min, FC_P_MAX))
 
-        Psk = P_demand - Pc
+        # FC delivers Pc × ETA_DCDC to the bus (boost-converter loss)
+        Psk = P_demand - Pc * ETA_DCDC
         ts  = sc_soc_update(s, Psk, DT)
 
         # SC floor protection
         if Psk > 0 and ts <= SC_SOC_MIN:
-            Pc  = float(np.clip(P_demand, FC_P_MIN, FC_P_MAX))
-            Psk = max(0., P_demand - Pc)
+            Pc  = float(np.clip(P_demand / ETA_DCDC, FC_P_MIN, FC_P_MAX))
+            Psk = max(0., P_demand - Pc * ETA_DCDC)
             ts  = sc_soc_update(s, Psk, DT)
 
         Pfc_arr[k] = Pc
@@ -161,9 +162,15 @@ def simulate_from_arrays(fn, va, ga, la, ca):
             eta_arr[k] = float(np.atleast_1d(eta_k)[0])
 
     total_km = float(np.sum(va * DT)) / 1000.
+    m_H2 = float(np.sum(mH2_arr)); dSOC = float(SOCa[n] - SC_SOC_0)
+    E_fc_J = float(np.sum(Pfc_arr) * DT)
+    # Charge-sustaining-normalised H2 (dSOC=0 basis) — see combined_best_profile
+    eta_sc_ow = SC_ETA ** 0.5
+    m_H2_norm = m_H2 - (dSOC * SC_E_J / (eta_sc_ow * ETA_DCDC) / E_fc_J) * m_H2 if E_fc_J > 0 else m_H2
     return {
-        'm_H2'     : float(np.sum(mH2_arr)),
-        'dSOC'     : float(SOCa[n] - SC_SOC_0),
+        'm_H2'     : m_H2,
+        'm_H2_norm': m_H2_norm,
+        'dSOC'     : dSOC,
         'SOC'      : SOCa[:-1],
         'Pfc'      : Pfc_arr,
         'Psc'      : Psc_arr,
@@ -304,8 +311,8 @@ def bisect_kp(va, ga, la, ca, label=''):
 
 # ── Step 5 — km/m³ calculation ────────────────────────────────────────────────
 def compute_km_per_m3(result):
-    """Compute km/m³ from simulation result."""
-    m_H2_kg = result['m_H2'] / 1000.          # g → kg
+    """Compute km/m³ from the charge-sustaining-normalised H2 (dSOC=0 basis)."""
+    m_H2_kg = result['m_H2_norm'] / 1000.      # g → kg
     vol_m3   = m_H2_kg / H2_DENSITY            # kg / (kg/m³) = m³
     return result['total_km'] / vol_m3
 

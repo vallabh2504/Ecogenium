@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Import all needed pieces from the now-importable combined_best_profile
 from combined_best_profile import (
     build_profile, compute_motor_signals, verify, simulate, make_strat_g,
-    TOTAL_KM, H2_DENSITY, DT, N_LAPS, bisect_kp,
+    TOTAL_KM, H2_DENSITY, DT, N_LAPS, bisect_kp, km_per_m3,
 )
 from ems_core import (
     SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX, SC_E_J, SC_V_MIN, SC_V_MAX,
@@ -64,7 +64,7 @@ for VH in VH_VALS:
             avg_v = float(np.mean(va[va > 0.3]))
             motor_on = float(np.mean(va > 0.3)) * 100.
             Kp, r = bisect_kp(P_e, la, ca, f"VH={VH} VL={VL} PP={PP:.0f}W")
-            km3 = TOTAL_KM / (r['m_H2'] / H2_DENSITY)
+            km3 = km_per_m3(r)
             cs  = abs(r['dSOC']) <= 0.015
             results.append(dict(VH=VH, VL=VL, PP=PP, Kp=Kp,
                                 H2=r['m_H2'], km3=km3, dSOC=r['dSOC'],

@@ -15,10 +15,10 @@ from scipy.signal import savgol_filter
 from scipy.interpolate import interp1d, RegularGridInterpolator
 
 from ems_core import (
-    FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2,
-    SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
+    FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2, ETA_DCDC,
+    SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_ETA, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
     K_H2, fc_current, fc_h2_rate, sc_soc_update, sc_voltage,
-    sc_terminal_voltage, motor_lookup_2d, R_WHEEL,
+    sc_terminal_voltage, motor_lookup_2d, motor_power_2d, MOTOR_VARIANT, R_WHEEL,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
 
@@ -122,11 +122,18 @@ def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.):
         vs[ms:me]=np.clip(vs[ms:me],0.,V_MAX)
     return ta,vs,Pa,sa,la,ea,ga,ca
 
-def compute_motor_signals(va, ga):
+def compute_motor_signals(va, ga, variant=None):
     """Vehicle dynamics → electrical demand via 2D BAFANG LUT.
     Returns P_elec [W], V_eff [V], Torque_Nm [Nm] (arrays, length=len(va)).
-    P_elec = I_dc × V_eff = true electrical power drawn from the DC bus.
-    Zeros where P_wheel <= 0 (glide, coast, regen)."""
+
+    P_elec is the DC bus power drawn by the motor controller, taken from the
+    LUT's P_in column for the selected iron-loss variant (default 'v1', the
+    most optimistic / lowest-iron-loss model — see ems_core.MOTOR_VARIANT).
+    For variant 'v1' this equals I_dc × V_eff exactly. Use variant 'v2'/'v3'
+    to study sensitivity to the iron-loss assumption.
+
+    No regenerative braking is modelled: zeros where P_wheel <= 0
+    (glide, coast, downhill braking)."""
     accel       = np.gradient(va, DT)
     P_wheel     = (CRR*MASS*G*va + 0.5*CD*AF*RHO*va**3
                    + MASS*accel*va + MASS*G*ga*va)
@@ -134,8 +141,8 @@ def compute_motor_signals(va, ga):
     v_safe      = np.maximum(va, 0.3)
     Torque_Nm   = (P_wheel_pos / v_safe) * R_WHEEL
     Speed_kmh   = va * 3.6
-    I_dc, V_eff, _ = motor_lookup_2d(Speed_kmh, Torque_Nm)
-    P_elec      = I_dc * V_eff   # true bus power: P_in from LUT = I_dc × V_nominal
+    _, V_eff, _ = motor_lookup_2d(Speed_kmh, Torque_Nm)
+    P_elec      = motor_power_2d(Speed_kmh, Torque_Nm, variant)  # DC bus power [W]
     return P_elec, V_eff, Torque_Nm
 
 def verify(t,v,la,silent=True):
@@ -319,16 +326,41 @@ def simulate(fn,P_elec_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
         is_coast=(bool(coast_arr[k]) if coast_arr is not None else I_m<0.1)
         fc_min=0. if is_coast else FC_P_MIN
         Pc=float(np.clip(Pc,fc_min,FC_P_MAX))
-        Psk=P_demand-Pc
+        # Pc = FC NET output (stack side, sets current/H2). The boost converter
+        # delivers Pc × ETA_DCDC to the bus, so the SC covers the remainder.
+        Psk=P_demand-Pc*ETA_DCDC
         ts=sc_soc_update(s,Psk,DT)
         if Psk>0 and ts<=SC_SOC_MIN:
-            Pc=float(np.clip(P_demand,FC_P_MIN,FC_P_MAX));Psk=max(0.,P_demand-Pc)
+            Pc=float(np.clip(P_demand/ETA_DCDC,FC_P_MIN,FC_P_MAX));Psk=max(0.,P_demand-Pc*ETA_DCDC)
             ts=sc_soc_update(s,Psk,DT)
         Pfc[k]=Pc;Psc[k]=Psk;SOCa[k+1]=ts
         Ifc[k]=float(fc_current(Pc)) if Pc>=FC_P_MIN else 0.
         mH2[k]=fc_h2_rate(Ifc[k])*DT; pp=Pc
-    return {'m_H2':float(np.sum(mH2)),'dSOC':float(SOCa[n]-SOC0),
+    m_H2=float(np.sum(mH2)); dSOC=float(SOCa[n]-SOC0)
+    E_fc_J=float(np.sum(Pfc)*DT)
+    m_H2_norm=_normalize_h2(m_H2,dSOC,E_fc_J)
+    return {'m_H2':m_H2,'m_H2_norm':m_H2_norm,'dSOC':dSOC,'E_fc_J':E_fc_J,
             'SOC':SOCa[:-1],'Pfc':Pfc,'Psc':Psc}
+
+def _normalize_h2(m_H2, dSOC, E_fc_J):
+    """Charge-sustaining-normalised H2 [g]: remove (or add back) the H2 that
+    produced the residual SC energy change, so strategies at slightly different
+    end-SOC are compared on an equal-energy basis (dSOC=0).
+
+    The SC stored-energy change dSOC×E_sc was deposited from the bus, which the
+    FC supplied through the boost converter and (charge-side) SC efficiency.
+    Convert that FC-net energy to H2 at the run's average H2 intensity
+    (m_H2 / E_fc_J) and subtract it.
+    """
+    if E_fc_J <= 0.:
+        return m_H2
+    eta_sc_ow = SC_ETA ** 0.5
+    dE_fc_J   = dSOC * SC_E_J / (eta_sc_ow * ETA_DCDC)   # FC-net J behind the dSOC
+    return m_H2 - (dE_fc_J / E_fc_J) * m_H2
+
+def km_per_m3(result, total_km=TOTAL_KM, h2_density=H2_DENSITY):
+    """km/m³ from the charge-sustaining-normalised H2 (preferred for ranking)."""
+    return total_km / (result['m_H2_norm'] / h2_density)
 
 def _bisect_param(make_fn,lo,hi,P_e,la,ca,param_name='param'):
     best=None
@@ -400,9 +432,10 @@ if __name__ == '__main__':
                     continue
                 P_e, V_eff, _ = compute_motor_signals(va, ga)
                 Kp,r = bisect_kp(P_e,la,ca,f"VH={VH} VL={VL} PP={PP}W")
-                km3  = TOTAL_KM/(r['m_H2']/H2_DENSITY)
+                km3  = km_per_m3(r)
                 cs   = abs(r['dSOC'])<=0.015
-                results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],km3=km3,
+                results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],
+                                    H2n=r['m_H2_norm'],E_fc_J=r['E_fc_J'],km3=km3,
                                     dSOC=r['dSOC'],cs=cs,
                                     ta=ta,va=va,Pa=Pa,sa=sa,la=la,ea=ea,ga=ga,ca=ca,
                                     SOC=r['SOC'],Pfc=r['Pfc'],Psc=r['Psc']))
@@ -415,7 +448,17 @@ if __name__ == '__main__':
     _,dur_best,_,_ = verify(best['ta'],best['va'],best['la'],silent=False)
     print(f"\n=== COMBINED BEST ===")
     print(f"  V_HIGH={best['VH']} m/s ({best['VH']*3.6:.1f}km/h)  V_LOW={best['VL']} m/s  PP={best['PP']}W")
-    print(f"  K_p={best['Kp']:.1f}  H2={best['H2']:.3f}g  km/m³={best['km3']:.1f}  dSOC={best['dSOC']:+.4f}")
+    print(f"  K_p={best['Kp']:.1f}  H2(raw)={best['H2']:.3f}g  H2(CS-norm)={best['H2n']:.3f}g  "
+          f"km/m³={best['km3']:.1f}  dSOC={best['dSOC']:+.4f}")
+    print(f"  (FC→bus converter η={ETA_DCDC:.2f}, SC round-trip η={SC_ETA:.2f}, motor iron-loss '{MOTOR_VARIANT}')")
+
+    # ── Motor iron-loss sensitivity band (v1 optimistic … v3 pessimistic) ──────
+    print(f"\n=== Motor iron-loss sensitivity (Strategy G on best profile) ===")
+    for var in ('v1', 'v2', 'v3'):
+        P_e_v, _, _ = compute_motor_signals(best['va'], best['ga'], variant=var)
+        _, r_v = bisect_kp(P_e_v, best['la'], best['ca'], f"iron-loss {var}")
+        print(f"  {var}: km/m³={km_per_m3(r_v):6.1f}  H2(norm)={r_v['m_H2_norm']:.3f}g  "
+              f"dSOC={r_v['dSOC']:+.4f}")
 
     # ── Save CSV ───────────────────────────────────────────────────────────────────
     df_out=pd.DataFrame({'time_s':best['ta'],'velocity_ms':best['va'],
@@ -431,54 +474,57 @@ if __name__ == '__main__':
     la_b=best['la']; ca_b=best['ca']
     P_e_b, V_eff_b, _ = compute_motor_signals(best['va'], best['ga'])
 
-    Kp_g=best['Kp']; r_g={'m_H2':best['H2'],'dSOC':best['dSOC'],
+    Kp_g=best['Kp']; r_g={'m_H2':best['H2'],'m_H2_norm':best['H2n'],
+                           'E_fc_J':best['E_fc_J'],'dSOC':best['dSOC'],
                            'SOC':best['SOC'],'Pfc':best['Pfc'],'Psc':best['Psc']}
     km3_g=best['km3']
 
     Ps_c, r_c = bisect_const(P_e_b,la_b,ca_b)
-    km3_c = TOTAL_KM/(r_c['m_H2']/H2_DENSITY)
+    km3_c = km_per_m3(r_c)
     print(f"  Constant FC  P_set={Ps_c:.0f}W  H2={r_c['m_H2']:.3f}g  km/m³={km3_c:.1f}  dSOC={r_c['dSOC']:+.4f}")
 
     Kp_pi, r_pi = bisect_pi(P_e_b,la_b,ca_b)
-    km3_pi = TOTAL_KM/(r_pi['m_H2']/H2_DENSITY)
+    km3_pi = km_per_m3(r_pi)
     print(f"  PI-only  K_p={Kp_pi:.1f}  H2={r_pi['m_H2']:.3f}g  km/m³={km3_pi:.1f}  dSOC={r_pi['dSOC']:+.4f}")
 
     Ph_r, r_r = bisect_rule(P_e_b,la_b,ca_b)
-    km3_r = TOTAL_KM/(r_r['m_H2']/H2_DENSITY)
+    km3_r = km_per_m3(r_r)
     print(f"  Rule-based  P_hi={Ph_r:.0f}W  H2={r_r['m_H2']:.3f}g  km/m³={km3_r:.1f}  dSOC={r_r['dSOC']:+.4f}")
 
     Ps_h, r_h = bisect_h(P_e_b,la_b,ca_b)
-    km3_h = TOTAL_KM/(r_h['m_H2']/H2_DENSITY)
+    km3_h = km_per_m3(r_h)
     print(f"  Strategy H  P_set={Ps_h:.0f}W  H2={r_h['m_H2']:.3f}g  km/m³={km3_h:.1f}  dSOC={r_h['dSOC']:+.4f}  "
           f"(FC peak-η at {P_PEAK_ETA:.0f}W, η={fc_eta(P_PEAK_ETA)*100:.1f}%)")
 
     Ks_a, r_a = bisect_a(P_e_b,la_b,ca_b)
-    km3_a = TOTAL_KM/(r_a['m_H2']/H2_DENSITY)
+    km3_a = km_per_m3(r_a)
     print(f"  Strategy A  K_soc={Ks_a:.1f}  H2={r_a['m_H2']:.3f}g  km/m³={km3_a:.1f}  dSOC={r_a['dSOC']:+.4f}")
 
+    # H2 shown is charge-sustaining-normalised (m_H2_norm) so the H₂ and km/m³
+    # columns are mutually consistent and the ranking is dSOC-fair.
     strategies = [
         dict(name='Strategy H\n(Large-SC Fixed-P)', param=f'P={Ps_h:.0f}W',
-             H2=r_h['m_H2'], km3=km3_h, dSOC=r_h['dSOC'],
+             H2=r_h['m_H2_norm'], km3=km3_h, dSOC=r_h['dSOC'],
              sc_swing=float(np.max(r_h['SOC'])-np.min(r_h['SOC'])),
              cs=abs(r_h['dSOC'])<=0.015, color='#56B4E9', Pfc=r_h['Pfc'], SOC=r_h['SOC']),
         dict(name='Strategy G\n(LPF+SOC-PI)', param=f'K_p={Kp_g:.0f}',
-             H2=r_g['m_H2'], km3=km3_g, dSOC=r_g['dSOC'],
+             H2=r_g['m_H2_norm'], km3=km3_g, dSOC=r_g['dSOC'],
              sc_swing=float(np.max(r_g['SOC'])-np.min(r_g['SOC'])),
              cs=abs(r_g['dSOC'])<=0.015, color='#D55E00', Pfc=r_g['Pfc'], SOC=r_g['SOC']),
         dict(name='Constant FC\n(Fixed P_FC)', param=f'P={Ps_c:.0f}W',
-             H2=r_c['m_H2'], km3=km3_c, dSOC=r_c['dSOC'],
+             H2=r_c['m_H2_norm'], km3=km3_c, dSOC=r_c['dSOC'],
              sc_swing=float(np.max(r_c['SOC'])-np.min(r_c['SOC'])),
              cs=abs(r_c['dSOC'])<=0.015, color='#CC79A7', Pfc=r_c['Pfc'], SOC=r_c['SOC']),
         dict(name='Rule-Based\n(Hysteresis)', param=f'P_hi={Ph_r:.0f}W',
-             H2=r_r['m_H2'], km3=km3_r, dSOC=r_r['dSOC'],
+             H2=r_r['m_H2_norm'], km3=km3_r, dSOC=r_r['dSOC'],
              sc_swing=float(np.max(r_r['SOC'])-np.min(r_r['SOC'])),
              cs=abs(r_r['dSOC'])<=0.015, color='#009E73', Pfc=r_r['Pfc'], SOC=r_r['SOC']),
         dict(name='PI Only\n(SOC-PI)', param=f'K_p={Kp_pi:.0f}',
-             H2=r_pi['m_H2'], km3=km3_pi, dSOC=r_pi['dSOC'],
+             H2=r_pi['m_H2_norm'], km3=km3_pi, dSOC=r_pi['dSOC'],
              sc_swing=float(np.max(r_pi['SOC'])-np.min(r_pi['SOC'])),
              cs=abs(r_pi['dSOC'])<=0.015, color='#0072B2', Pfc=r_pi['Pfc'], SOC=r_pi['SOC']),
         dict(name='Strategy A\n(2D LUT)', param=f'K_soc={Ks_a:.0f}',
-             H2=r_a['m_H2'], km3=km3_a, dSOC=r_a['dSOC'],
+             H2=r_a['m_H2_norm'], km3=km3_a, dSOC=r_a['dSOC'],
              sc_swing=float(np.max(r_a['SOC'])-np.min(r_a['SOC'])),
              cs=abs(r_a['dSOC'])<=0.015, color='#E69F00', Pfc=r_a['Pfc'], SOC=r_a['SOC']),
     ]
@@ -698,7 +744,7 @@ if __name__ == '__main__':
 
     fig.suptitle(
         f'Hydraix I SEM 2026 — Best Velocity Profile  |  '
-        f'Strategy H km/m³={km3_h:.1f}  H₂={r_h["m_H2"]:.3f}g  ΔSOC={r_h["dSOC"]:+.4f}  '
+        f'Strategy H km/m³={km3_h:.1f}  H₂(CS-norm)={r_h["m_H2_norm"]:.3f}g  ΔSOC={r_h["dSOC"]:+.4f}  '
         f'Race: {best["ta"][-1]/60.:.1f} min  |  SC: HyCap 20P×16S {SC_E_J/3600:.0f} Wh',
         fontsize=12,fontweight='bold',y=0.995)
 

@@ -5,6 +5,15 @@
 > Hydraix I fuel-cell/supercapacitor EMS. Hand this folder to any new developer
 > or agent — all inputs, scripts, models, strategies, and results are here.
 
+> **Model corrections (latest revision):**
+> 1. **FC identity fixed** — the stack is a **balticFuelCells LC 52.30** (52 cells × 30 cm², ~1040 W gross), *not* a "Horizon 52 W" unit (confirmed against `FC_Manual.pdf`).
+> 2. **FC→bus DC-DC converter loss** added (`ETA_DCDC = 0.95`); `P_fc` is FC net output, bus receives `P_fc × 0.95`.
+> 3. **Charge-sustaining normalisation** — strategies are ranked on dSOC=0-normalised H₂ (`km_per_m3()` / `m_H2_norm`), removing tolerance-band artefacts.
+> 4. **Motor iron-loss variant** is `v1` (optimistic); the main sim now prints a v1/v2/v3 km/m³ sensitivity band (≈ 200 / 164 / 139).
+> 5. **SC efficiency** `SC_ETA=0.97` is now applied as √0.97 per direction (true 3 % round-trip).
+> 6. Vehicle constants in this README corrected to match the code; 1D `motor_eta` deprecated.
+> Net effect: headline Strategy-G result moved from ~211 to **~205 km/m³** (normalised, with converter loss).
+
 ---
 
 ## Table of Contents
@@ -35,7 +44,7 @@ SIM/
 │   ├── HyCaps.pdf                     ← VINATech VEL13353R8257G LIC datasheet
 │   ├── Hycaps.txt                     ← Team notes on HyCap configuration
 │   ├── BAFANG_RM_G060.1000_motor_datasheet.pdf
-│   └── FC_Manual.pdf                  ← Horizon LC52.30 fuel cell manual
+│   └── FC_Manual.pdf                  ← balticFuelCells LC 52.30 fuel cell manual (~1040 W)
 │
 ├── scripts/                           ← runnable simulation scripts
 │   ├── ems_core.py                    ← physics core (import this, don't run)
@@ -84,7 +93,7 @@ SIM/
 | `HyCaps.pdf` | VINATech VEL13353R8257G Lithium-Ion Capacitor (LIC) datasheet. Key specs: 3,800 F rated, 3.8 V max, **2.5 V minimum** (hard limit — below this damages the cell), DC ESR = 100 mΩ/cell. |
 | `Hycaps.txt` | Internal team notes. Confirms 2026 configuration: **20P × 16S**. Notes from 2023/24 season (16S × 10P). Power test data: 59.7 V → 40 V @ 1 A → 14 Wh. |
 | `BAFANG_RM_G060.1000_motor_datasheet.pdf` | Motor manufacturer datasheet. Peak torque, rated current, winding specs. |
-| `FC_Manual.pdf` | Horizon LC52.30 fuel cell manual. Rated 52 W, polarisation curve, H₂ consumption map, operating limits. |
+| `FC_Manual.pdf` | **balticFuelCells GmbH FC Stack LC 52.30** user manual (Issue 05/2024). ⚠️ "52.30" denotes **52 cells × 30 cm² active area — NOT 52 W**. Extended-system nameplate ≈ **1040 W gross / ~1016 W net @ 37.5 A**; peak system η ≈ **59 % @ 120 W**. Polarisation curve, H₂ map, operating limits. (Earlier docs mislabelled this as a "Horizon 52 W" stack — incorrect.) |
 
 ### scripts/
 
@@ -101,7 +110,8 @@ SIM/
 |------|-------------|
 | `motor_model.py` | **Standalone 2D motor LUT.** Loads `datasheets/motor_lookup_table.xlsx` and exposes `motor_lookup_2d(speed_kmh, torque_nm) → (I_dc_A, V_eff_V, eta)`, `motor_eta(p_out_W)` (1D fallback), and `R_WHEEL = 0.295 m`. Import directly without needing `ems_core`. |
 | `supercap_model.py` | **Standalone SC bank model.** Exports all SC constants (`SC_C`, `SC_V_MAX`, `SC_V_MIN`, `SC_ESR`, `SC_E_J`, `SC_SOC_0`, `SC_SOC_MIN`, `SC_SOC_MAX`) and three functions: `sc_voltage(soc)`, `sc_terminal_voltage(soc, I_A)`, `sc_soc_update(soc, P_W, dt)`. Import directly without needing `ems_core`. |
-| `FuelCellEstimate_v3.py` | Electrochemical model of the Horizon LC52.30. Fits the polarisation curve (V = OCV − R_int × I − η_act) to measured data. Outputs `fc_voltage(I)`, `fc_power(I)`, `fc_h2_rate(I)`. The fitted coefficients are hardcoded into `ems_core.py` as the `_P_TAB` / `_I_TAB` inversion arrays. |
+| `FuelCellEstimate_v3.py` | Electrochemical model of the **balticFuelCells LC 52.30** (Chamberlin–Kim polarisation, 52 cells, 30 cm², calibrated to the 1040 W gross nameplate). Outputs stack voltage/power, BOP, and `fc_h2_rate(I)`. The inverted P_net→I curve is hardcoded into `ems_core.py` as the `_P_TAB` / `_I_TAB` arrays. Verified: P_gross@37.5A=1044 W, V@40A=27.1 V, 19.0 SLPM, peak η_sys 59 % @ 120 W. |
+| `motor_model.py` (note) | Uses the **`v1` iron-loss variant** of the LUT (lowest iron loss → most optimistic efficiency, peak ~74 %). `v2`/`v3` are higher-loss models; the main sim reports a v1/v2/v3 km/m³ sensitivity band. The 1D `motor_eta()` (peak ~83 %) is **deprecated/legacy** and disagrees with the 2D LUT — do not use it for new work. |
 
 ### strategies/
 
@@ -206,11 +216,12 @@ SIM/
               │       P_fc_prev,              │
               │       t_in_lap, lap_idx)      │
               │                               │
-              │  6. P_sc = P_elec - P_fc      │  ← SC fills the gap
+              │  6. P_sc = P_elec            │  ← SC fills the gap
+              │       − P_fc·η_dcdc           │    (η_dcdc=0.95 boost loss)
               │  7. I_sc = P_sc / U_sc        │
-              │  8. SOC += I_sc·dt / (C·U_sc) │  ← charge balance
+              │  8. SOC += I_sc·dt / (C·U_sc) │  ← charge balance (√η/dir)
               │                               │
-              │  9. I_fc = fc_current(P_fc)   │
+              │  9. I_fc = fc_current(P_fc)   │  ← P_fc = FC net (stack side)
               │  10. ΔH₂ = K_H2·I_fc·dt      │  ← Faraday's law
               └───────────────┬───────────────┘
                               │
@@ -261,16 +272,20 @@ SIM/
 
 ### Vehicle (combined_best_profile.py)
 
+> ⚠️ Values below are the **actual code constants** in `combined_best_profile.py`
+> (and `profile_comparison.py`). A previous version of this table listed stale
+> values (170 kg, CRR 0.003, Cd 0.25, Af 0.50, η_dt 0.97) — corrected here.
+
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `MASS` | 170 kg | Vehicle + driver mass |
-| `CRR` | 0.003 | Rolling resistance coefficient |
-| `CD` | 0.25 | Drag coefficient |
-| `AF` | 0.50 m² | Frontal area |
+| `MASS` | 175 kg | Vehicle + driver mass |
+| `CRR` | 0.006 | Rolling resistance coefficient |
+| `CD` | 0.15 | Drag coefficient |
+| `AF` | 0.8 m² | Frontal area |
 | `RHO` | 1.225 kg/m³ | Air density |
 | `G` | 9.81 m/s² | Gravitational acceleration |
 | `R_WHEEL` | 0.295 m | Wheel radius (verified: P = T·v/R) |
-| `ETA_DT` | 0.97 | Drivetrain efficiency (chain + bearings) |
+| `ETA_DT` | 0.95 | Drivetrain efficiency (chain + bearings) |
 
 ### Race Constraint (combined_best_profile.py)
 
@@ -296,21 +311,28 @@ SIM/
 | `SC_V_MIN` | 40.0 V | 16 × 2.5 V |
 | `SC_E_J` | ~327,600 J | ½·C·(V_max²−V_min²) = **91.0 Wh** |
 | `SC_ESR` | 0.080 Ω | 100 mΩ/cell × 16S / 20P |
+| `SC_ETA` | 0.97 | **Round-trip** efficiency — applied as √0.97 ≈ 0.985 per direction in `sc_soc_update()`, so a full charge→discharge cycle loses exactly 3 % |
 | `SC_SOC_0` | 0.60 | Initial SOC (60%) |
 | `sc_voltage(SOC)` | `√(V_min² + SOC·(V_max²−V_min²))` | OCV from energy-based SOC |
+
+### Power-electronics losses (ems_core.py)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `ETA_DCDC` | 0.95 | **FC → bus boost-converter efficiency.** FC stack runs ~27–46 V, SC bus 40–60.8 V, so a boost stage is required. `P_fc` is the FC net output (sets current/H₂); the bus receives `P_fc × ETA_DCDC`. |
 
 ### Fuel Cell (ems_core.py)
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| Model | Horizon LC52.30 | 52 W rated PEM stack |
-| `FC_P_MIN` | 100 W | Minimum stable FC output |
-| `FC_P_MAX` | 620 W | Maximum FC output |
-| `FC_RAMP` | 50 W/s | Max FC power ramp rate |
-| `LHV_H2` | 33.3 Wh/g | Lower heating value of H₂ |
-| `K_H2` | ~3.7×10⁻⁴ g/(A·s) | H₂ mass per coulomb (Faraday) |
-| `H2_DENSITY` | 0.0899 kg/m³ | H₂ density at STP |
-| Peak efficiency | ~59% | At ~120 W electrical output |
+| Model | **balticFuelCells LC 52.30** | 52-cell × 30 cm² PEM stack (~1040 W gross), **not** a 52 W unit |
+| `FC_P_MIN` | 100 W | Minimum stable FC net output (membrane idle floor) |
+| `FC_P_MAX` | 1013 W | Maximum FC net output (≈37.5 A) |
+| `FC_RAMP` | 100 W/s | Max FC power ramp rate |
+| `LHV_H2` | 33.3 Wh/g (120 kJ/g) | Lower heating value of H₂ |
+| `K_H2` | 5.43×10⁻⁴ g/(A·s) | H₂ mass per coulomb = N·M_H2/(2F), N=52 (Faraday) |
+| `H2_DENSITY` | 0.0899 kg/m³ (89.88 g/m³) | H₂ density at STP |
+| Peak efficiency | ~59% | At ~120 W net output |
 
 ### Best P&G Profile Parameters
 
@@ -345,15 +367,20 @@ This script:
 - Builds the best P&G profile and runs 5 strategies (B/C/D/A/G)
 - Prints a results table and consistency checks
 
-Expected output (all PASS, all charge-sustaining):
+Expected output (all PASS, all charge-sustaining). km/m³ is **charge-sustaining-
+normalised** (dSOC=0 basis) and includes the FC→bus converter loss (η=0.95):
 ```
   Strategy           km/m³    H2[g]      dSOC   CS?
-  G  LPF+PI+150W     211.4    6.164   +0.0078   YES ★
-  D  Const-FC        210.1    6.203   -0.0119   YES
-  A  2D-LUT          206.7    6.306   +0.0062   YES
-  C  Strat-H         206.2    6.320   +0.0079   YES
-  B  Rule-FSM        205.1    6.354   +0.0138   YES
+  G  LPF+PI+150W     205.2    6.403   +0.0098   YES ★
+  A  2D-LUT          198.7    6.510   -0.0091   YES
+  B  Rule-FSM        198.7    6.521   -0.0073   YES
+  D  Const-FC        198.7    6.536   -0.0044   YES
+  C  Strat-H         198.2    6.641   +0.0124   YES
 ```
+> Note: after dSOC-normalisation the Constant/Rule/2D-LUT strategies are
+> effectively tied (~198.7) — their earlier apparent differences were
+> charge-sustaining-tolerance artefacts. Strategy G's lead (+6.5 km/m³) is the
+> only robust one, driven by running the FC continuously near its 59 %-η point.
 
 ### Run the main simulation
 
@@ -418,14 +445,17 @@ All 6 strategies are implemented in `scripts/combined_best_profile.py` as
 `make_strat_*()` factory functions. Each returns `fn(I_motor, U_sc, P_fc_prev,
 t_in_lap, lap_idx) → P_fc [W]`.
 
+> km/m³ below are **charge-sustaining-normalised** (dSOC=0) and include the
+> FC→bus converter loss (η=0.95). At grid point VH=9.0, VL=6.5, PP=700 W.
+
 | Strategy | Function | Description | Best km/m³ |
 |----------|----------|-------------|-----------|
-| **G (winner)** | `make_strat_g(K_p, K_i, tau)` | LPF feedforward + SOC-PI + lap-offset + **150 W floor always-on** | **211.4** |
-| H | `make_strat_h(K_p)` | Minimise H₂ subject to SOC band (rule-based + PI) | ~202.7 |
-| Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~202.2 |
-| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) table | ~201.8 |
-| Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~201.7 |
-| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | ~215.7 (not charge-sustaining) |
+| **G (winner)** | `make_strat_g(K_p, K_i, tau)` | LPF feedforward + SOC-PI + lap-offset + **150 W floor always-on** | **205.2** |
+| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) table | ~198.7 |
+| Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~198.7 |
+| Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~198.7 |
+| H | `make_strat_h(P_set)` | Large-SC optimal constant dispatch + soft SOC term | ~198.2 |
+| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | n/a (not charge-sustaining) |
 
 ### Strategy G — Why it wins
 
@@ -449,25 +479,33 @@ t_in_lap, lap_idx) → P_fc [W]`.
 
 ### Final Rankings (VH=9.0, VL=6.5, PP=700 W, 11 laps, 14.5 km)
 
+> **km/m³ are charge-sustaining-normalised (dSOC=0) and include the FC→bus
+> converter loss (η_dcdc=0.95) and the corrected SC round-trip (√0.97/dir).**
+> These supersede the earlier un-normalised, converter-free figures (~211).
+
 | Rank | Strategy | km/m³ | H₂ [g] | dSOC | CS? |
 |------|----------|-------|--------|------|-----|
-| 1 | **Strategy G (150 W floor)** | **211.4** | 6.18 | +0.007 | ✓ |
-| 2 | Strategy H | ~202.7 | ~6.43 | +0.002 | ✓ |
-| 3 | Rule-Based | ~202.2 | ~6.45 | +0.005 | ✓ |
-| 4 | Strategy A (2D LUT) | ~201.8 | ~6.46 | +0.007 | ✓ |
-| 5 | Constant FC | ~201.7 | ~6.46 | +0.008 | ✓ |
-| — | PI only | ~215.7 | ~6.04 | −0.074 | ✗ |
+| 1 | **Strategy G (150 W floor)** | **205.2** | 6.40 | +0.010 | ✓ |
+| 2 | Strategy A (2D LUT) | ~198.7 | ~6.51 | −0.009 | ✓ |
+| 2 | Rule-Based | ~198.7 | ~6.52 | −0.007 | ✓ |
+| 2 | Constant FC | ~198.7 | ~6.54 | −0.004 | ✓ |
+| 5 | Strategy H | ~198.2 | ~6.64 | +0.012 | ✓ |
+| — | PI only | n/a | — | large | ✗ |
 
-CS = Charge-Sustaining (`|dSOC| ≤ 0.015`)
+CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). After normalisation, ranks 2–4 are a
+statistical tie; only Strategy G's lead is robust.
 
 ### P&G Grid Search Best (Strategy G, charge-sustaining)
 
-| Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ |
+> Absolute km/m³ are ~5 % lower than the pre-fix figures because the FC→bus
+> converter loss is now modelled; the relative (VH, VL, PP) ordering is
+> essentially unchanged. Rank-1 normalised value ≈ **205.2 km/m³**. Re-run
+> `grid_search_extended.py` for the full refreshed heatmap.
+
+| Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ (normalised) |
 |------|----------|----------|--------|-------|
-| 1 | 9.0 | **6.5** | 700 | **211.4** |
-| 2 | 9.5 | 6.5 | 600 | 211.2 |
-| 3 | 9.5 | 6.5 | 700 | 211.2 |
-| 4 | 9.0 | 7.0 | 700 | 210.5 |
+| 1 | 9.0 | **6.5** | 700 | **205.2** |
+| ~ | 9.0–9.5 | 6.5–7.0 | 600–700 | ~199–205 (near-tied) |
 
 Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 14.5 km in time including coast-to-stop phases).
@@ -574,8 +612,9 @@ P_elec, V_eff, Torque_Nm = compute_motor_signals(va, ga)
 # 3. Run EMS strategy simulation
 result = simulate(make_strat_g(K_p, K_i=2.0), P_elec, la, ca)
 
-# 4. Compute km/m³
-km3 = TOTAL_KM / (result['m_H2'] / H2_DENSITY)
+# 4. Compute km/m³  (use the charge-sustaining-normalised helper)
+km3 = km_per_m3(result)            # uses result['m_H2_norm'] (dSOC=0 basis)
+# result also carries 'm_H2' (raw), 'E_fc_J', 'dSOC'
 ```
 
 ### Array conventions
@@ -627,9 +666,10 @@ U_sc = sc_voltage(SOC) - I_motor * SC_ESR
 ### H₂ consumption formula
 
 ```python
-I_fc = fc_current(P_fc)         # A, from polarisation curve
+I_fc = fc_current(P_fc)         # A, from polarisation curve (P_fc = FC net, stack side)
 dH2  = K_H2 * I_fc * DT        # g per time step
-# K_H2 ≈ 3.7×10⁻⁴ g/(A·s) — derived from Faraday's law for H₂
+# K_H2 = N·M_H2/(2F) = 52×2.016/(2×96485) ≈ 5.43×10⁻⁴ g/(A·s)  — Faraday's law, N=52 cells
+# Note: P_fc delivers P_fc × ETA_DCDC (0.95) to the SC bus via the boost converter.
 ```
 
 ---
