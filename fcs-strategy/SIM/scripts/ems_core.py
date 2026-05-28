@@ -43,8 +43,8 @@ import os
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _THIS_DIR   = os.path.dirname(os.path.abspath(__file__))
-MATLAB_DIR  = os.path.join(_THIS_DIR, '..', 'matlab')
-RESULTS_DIR = os.path.join(_THIS_DIR, '..', 'results', 'ems')
+MATLAB_DIR  = os.path.join(_THIS_DIR, '..', 'data')
+RESULTS_DIR = os.path.join(_THIS_DIR, '..', 'plots')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # ── Simulation constants ───────────────────────────────────────────────────────

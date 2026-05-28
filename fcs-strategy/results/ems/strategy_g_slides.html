@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Strategy G — LPF Feedforward + SOC-PI | Hydraix I · SEM 2026</title>
+
+  <!-- Reveal.js CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reset.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/theme/night.css">
+
+  <!-- Highlight.js for code syntax -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/atom-one-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/lib/languages/python.min.js"></script>
+
+  <style>
+    /* ── Custom theme overrides ───────────────────────────────────────── */
+    :root {
+      --c-bg:       #0d1117;
+      --c-bg2:      #161b22;
+      --c-surface:  #1f2937;
+      --c-border:   #30363d;
+      --c-text:     #e6edf3;
+      --c-muted:    #8b949e;
+      --c-orange:   #f39c12;
+      --c-green:    #27ae60;
+      --c-blue:     #2980b9;
+      --c-teal:     #1abc9c;
+      --c-red:      #e74c3c;
+      --c-purple:   #9b59b6;
+      --c-yellow:   #f1c40f;
+      --c-white:    #ffffff;
+    }
+
+    .reveal-viewport {
+      background: var(--c-bg);
+    }
+
+    .reveal .slides {
+      text-align: left;
+    }
+
+    .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+      text-transform: none;
+      letter-spacing: -0.02em;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    .reveal h1 { font-size: 2em;   color: #ffffff; }
+    .reveal h2 { font-size: 1.45em; color: #e0e8f0; border-bottom: 2px solid var(--c-blue); padding-bottom: 6px; }
+    .reveal h3 { font-size: 1.1em; color: var(--c-orange); margin-bottom: 0.4em; }
+    .reveal p, .reveal li { font-size: 0.78em; line-height: 1.6; color: var(--c-text); }
+    .reveal li { margin-bottom: 0.3em; }
+
+    /* Footer on every slide */
+    .slide-footer {
+      position: fixed;
+      bottom: 12px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 0.58em;
+      color: var(--c-muted);
+      letter-spacing: 0.08em;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    /* ── Utility classes ─────────────────────────────────────────── */
+    .mono { font-family: 'Courier New', Courier, monospace; font-size: 0.85em; }
+    .orange { color: var(--c-orange); }
+    .green  { color: var(--c-green); }
+    .blue   { color: var(--c-blue); }
+    .teal   { color: var(--c-teal); }
+    .red    { color: var(--c-red); }
+    .purple { color: var(--c-purple); }
+    .yellow { color: var(--c-yellow); }
+    .muted  { color: var(--c-muted); }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.72em;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .tag-orange { background: rgba(243,156,18,0.2); color: var(--c-orange); border: 1px solid rgba(243,156,18,0.4); }
+    .tag-green  { background: rgba(39,174,96,0.2);  color: var(--c-green);  border: 1px solid rgba(39,174,96,0.4); }
+    .tag-blue   { background: rgba(41,128,185,0.2); color: #5daaf5;         border: 1px solid rgba(41,128,185,0.4); }
+    .tag-teal   { background: rgba(26,188,156,0.2); color: var(--c-teal);   border: 1px solid rgba(26,188,156,0.4); }
+    .tag-red    { background: rgba(231,76,60,0.2);  color: var(--c-red);    border: 1px solid rgba(231,76,60,0.4); }
+
+    /* ── Stat boxes ─────────────────────────────────────────────── */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .stat-grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .stat-box {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      padding: 14px 12px 10px;
+      text-align: center;
+    }
+    .stat-box .stat-val {
+      font-size: 1.5em;
+      font-weight: 700;
+      display: block;
+      line-height: 1.1;
+    }
+    .stat-box .stat-lbl {
+      font-size: 0.6em;
+      color: var(--c-muted);
+      display: block;
+      margin-top: 4px;
+    }
+
+    /* ── Two/Three column layouts ───────────────────────────────── */
+    .col-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .col-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    /* ── Panels / cards ─────────────────────────────────────────── */
+    .panel {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .panel.orange-border { border-color: var(--c-orange); }
+    .panel.green-border  { border-color: var(--c-green); }
+    .panel.teal-border   { border-color: var(--c-teal); }
+    .panel.blue-border   { border-color: var(--c-blue); }
+    .panel.red-border    { border-color: var(--c-red); }
+    .panel.purple-border { border-color: var(--c-purple); }
+
+    /* ── Formula display ────────────────────────────────────────── */
+    .formula {
+      background: #0d1117;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82em;
+      color: var(--c-teal);
+      margin: 8px 0;
+    }
+
+    /* ── Tables ─────────────────────────────────────────────────── */
+    .reveal table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.72em;
+    }
+    .reveal table th {
+      background: var(--c-surface);
+      color: var(--c-orange);
+      padding: 8px 12px;
+      border: 1px solid var(--c-border);
+      text-align: left;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .reveal table td {
+      padding: 7px 12px;
+      border: 1px solid var(--c-border);
+      color: var(--c-text);
+    }
+    .reveal table tr:nth-child(even) td {
+      background: rgba(255,255,255,0.03);
+    }
+    .reveal table tr.highlight-row td {
+      background: rgba(39,174,96,0.18);
+      color: #7ee8b0;
+      font-weight: 700;
+    }
+    .reveal table tr.muted-row td {
+      color: var(--c-muted);
+      font-style: italic;
+    }
+
+    /* ── Timeline bar (Slide 2) ─────────────────────────────────── */
+    .timeline-wrap {
+      margin: 18px 0 10px;
+    }
+    .timeline-bar {
+      display: flex;
+      height: 42px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--c-border);
+    }
+    .tl-phase {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.68em;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: #fff;
+    }
+    .tl-pulse { background: linear-gradient(135deg, #c0392b, #e74c3c); }
+    .tl-glide { background: linear-gradient(135deg, #1d6fa4, #2980b9); }
+    .tl-coast { background: linear-gradient(135deg, #1a5c38, #27ae60); }
+
+    .tl-labels {
+      display: flex;
+      margin-top: 6px;
+    }
+    .tl-lbl {
+      font-size: 0.6em;
+      color: var(--c-muted);
+      text-align: center;
+    }
+
+    /* ── Code blocks ────────────────────────────────────────────── */
+    .reveal pre {
+      background: #0d1117;
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      box-shadow: none;
+      margin: 10px 0;
+      padding: 0;
+      width: 100%;
+    }
+    .reveal pre code {
+      font-size: 0.72em;
+      line-height: 1.5;
+      padding: 14px 16px;
+    }
+    .code-label {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      display: inline-block;
+      font-size: 0.62em;
+      padding: 4px 12px;
+      color: var(--c-muted);
+      margin-bottom: -1px;
+    }
+
+    /* ── Slide 1 title ──────────────────────────────────────────── */
+    .title-slide {
+      text-align: center;
+    }
+    .title-slide h1 {
+      font-size: 1.9em;
+      background: linear-gradient(135deg, #f39c12, #e67e22);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 6px;
+    }
+    .title-tagline {
+      display: inline-flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 22px;
+    }
+    .title-divider {
+      width: 80px;
+      height: 3px;
+      background: linear-gradient(90deg, var(--c-orange), var(--c-blue));
+      margin: 18px auto;
+      border-radius: 2px;
+    }
+    .title-meta {
+      font-size: 0.72em;
+      color: var(--c-muted);
+    }
+
+    /* ── Input box arrows (Slide 3) ─────────────────────────────── */
+    .input-block {
+      background: var(--c-surface);
+      border: 2px solid var(--c-blue);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+    }
+    .input-block .ib-label {
+      font-size: 0.62em;
+      color: var(--c-blue);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+    .input-block .ib-formula {
+      font-family: 'Courier New', monospace;
+      font-size: 0.8em;
+      color: var(--c-teal);
+    }
+    .input-block .ib-note {
+      font-size: 0.62em;
+      color: var(--c-muted);
+      margin-top: 2px;
+    }
+
+    /* ── Bullet check/cross ─────────────────────────────────────── */
+    .check { color: var(--c-green); }
+    .cross { color: var(--c-red); }
+
+    /* ── Flowchart tooltip ──────────────────────────────────────── */
+    .svg-caption {
+      text-align: center;
+      font-size: 0.6em;
+      color: var(--c-muted);
+      margin-top: 6px;
+    }
+
+    /* ── Bar comparison (Slide 6) ───────────────────────────────── */
+    .bar-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin: 10px 0;
+    }
+    .bar-container {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .bar-title {
+      font-size: 0.72em;
+      font-weight: 700;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .bar-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+      gap: 10px;
+    }
+    .bar-lbl {
+      font-size: 0.62em;
+      color: var(--c-muted);
+      width: 95px;
+      flex-shrink: 0;
+      text-align: right;
+    }
+    .bar-track {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border-radius: 4px;
+      height: 18px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      padding-left: 6px;
+    }
+    .bar-val {
+      font-size: 0.6em;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    /* ── Note box ───────────────────────────────────────────────── */
+    .note-box {
+      background: rgba(241,196,15,0.08);
+      border: 1px solid rgba(241,196,15,0.35);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.68em;
+      color: #e8d87a;
+      margin-top: 12px;
+    }
+    .note-box::before {
+      content: "⚑ NOTE: ";
+      font-weight: 700;
+    }
+
+    /* ── Decision diamond SVG ───────────────────────────────────── */
+    .svg-wrapper {
+      width: 100%;
+      overflow: hidden;
+    }
+
+    /* ── Reveal fragment fade styles ────────────────────────────── */
+    .reveal .fragment.highlight-orange.visible {
+      color: var(--c-orange);
+    }
+
+    /* ── Centered icon row ──────────────────────────────────────── */
+    .icon-row {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin: 14px 0;
+    }
+    .icon-item {
+      text-align: center;
+    }
+    .icon-circle {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 6px;
+      font-size: 1.4em;
+    }
+    .icon-lbl {
+      font-size: 0.6em;
+      color: var(--c-muted);
+    }
+
+    /* ── Reveal.js misc fixes ───────────────────────────────────── */
+    .reveal .slides section {
+      padding: 6px 40px;
+    }
+    .reveal .progress {
+      color: var(--c-orange);
+    }
+
+    /* Slide 9 lessons grid */
+    .lesson-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .lesson-item {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .lesson-item .li-q {
+      font-size: 0.68em;
+      font-weight: 700;
+      color: var(--c-orange);
+      margin-bottom: 4px;
+    }
+    .lesson-item .li-a {
+      font-size: 0.63em;
+      color: var(--c-text);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Global footer ────────────────────────────────────────────── -->
+<div class="slide-footer">Hydraix I &nbsp;·&nbsp; SEM 2026 Shell Eco-Marathon &nbsp;·&nbsp; EMS Strategy G</div>
+
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 1 — Title
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <div class="title-slide">
+        <div style="margin-bottom:10px;">
+          <span class="tag tag-blue" style="font-size:0.75em;">HYDRAIX I</span>
+          &nbsp;
+          <span class="tag tag-orange" style="font-size:0.75em;">SEM 2026</span>
+          &nbsp;
+          <span class="tag tag-green" style="font-size:0.75em;">SHELL ECO-MARATHON</span>
+        </div>
+
+        <h1>Strategy G</h1>
+        <h2 style="border:none; color:#a8c8e8; font-size:1.25em; text-align:center; margin:0;">
+          LPF Feedforward + SOC-PI Controller
+        </h2>
+        <p style="text-align:center; color:var(--c-muted); font-size:0.7em; margin:4px 0 0;">
+          Fuel Cell Energy Management System
+        </p>
+
+        <div class="title-divider"></div>
+
+        <div class="title-tagline">
+          <span class="tag tag-red">FC always alive &ge; 150 W</span>
+          <span class="tag tag-orange">206.8 km/m³</span>
+          <span class="tag tag-green">Charge-Sustaining &Delta;SOC +0.007</span>
+        </div>
+
+        <div style="margin-top: 30px;">
+          <div class="stat-grid-4">
+            <div class="stat-box">
+              <span class="stat-val orange">2075</span>
+              <span class="stat-lbl">K<sub>p</sub> [W/SOC]</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-val teal">2</span>
+              <span class="stat-lbl">K<sub>i</sub> [W/(SOC·s)]</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-val blue">15 s</span>
+              <span class="stat-lbl">LPF time constant &tau;</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-val green">150 W</span>
+              <span class="stat-lbl">FC floor (always warm)</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="title-meta" style="margin-top:20px;">
+          Adaptive &bull; No drive-cycle knowledge required &bull; Line-for-line Simulink-translatable
+        </p>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 2 — System Overview & Motivation
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>System Overview &amp; Motivation</h2>
+
+      <div class="col-2" style="gap:18px;">
+        <!-- Left: Why EMS -->
+        <div>
+          <h3>Why we need an EMS</h3>
+          <ul>
+            <li class="fragment" data-fragment-index="1">
+              <span class="orange">Fuel cell</span> has slow dynamics — ramp rate limited to
+              <span class="mono orange">100 W/s</span>
+            </li>
+            <li class="fragment" data-fragment-index="2">
+              Motor load swings from <span class="mono">0 → 600+ W</span> in milliseconds
+              during pulse &amp; acceleration
+            </li>
+            <li class="fragment" data-fragment-index="3">
+              <span class="teal">Supercapacitor</span> bridges the transient gap — absorbs FC surplus,
+              supplies burst demand
+            </li>
+            <li class="fragment" data-fragment-index="4">
+              EMS must keep SC <span class="green">charge-neutral</span> lap-to-lap while
+              maximising FC efficiency
+            </li>
+          </ul>
+
+          <div class="panel blue-border" style="margin-top:14px;" data-fragment-index="5">
+            <div class="fragment" data-fragment-index="5">
+              <h3 style="margin-top:0; font-size:0.82em;">Key System Numbers</h3>
+              <table style="font-size:0.68em;">
+                <tr><td>V<sub>SC</sub> range</td><td class="teal mono">40 – 60.8 V</td></tr>
+                <tr><td>C<sub>bank</sub></td><td class="teal mono">312.5 F (20P × 16S)</td></tr>
+                <tr><td>E<sub>SC</sub></td><td class="teal mono">91.0 Wh usable</td></tr>
+                <tr><td>ESR</td><td class="teal mono">80 m&Omega; (100 m&Omega;/cell × 16S/20P)</td></tr>
+                <tr><td>FC range</td><td class="orange mono">150 – 600 W</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Timeline -->
+        <div>
+          <h3>Pulse &amp; Glide Velocity Profile</h3>
+          <p style="font-size:0.68em; color:var(--c-muted);">One lap (~237 s) — three distinct phases</p>
+
+          <div class="timeline-wrap">
+            <div class="timeline-bar">
+              <div class="tl-phase tl-pulse" style="width:29.5%;">PULSE</div>
+              <div class="tl-phase tl-glide" style="width:37.1%;">GLIDE</div>
+              <div class="tl-phase tl-coast" style="width:33.4%;">COAST / STOP</div>
+            </div>
+            <div class="tl-labels">
+              <div class="tl-lbl" style="width:29.5%;">~70 s</div>
+              <div class="tl-lbl" style="width:37.1%;">~88 s</div>
+              <div class="tl-lbl" style="width:33.4%;">~79 s</div>
+            </div>
+          </div>
+
+          <table style="font-size:0.66em; margin-top:12px;">
+            <thead>
+              <tr>
+                <th>Phase</th><th>Motor</th><th>FC</th><th>SC role</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="red">PULSE</span></td>
+                <td>~600 W peak</td>
+                <td>Ramps up</td>
+                <td>Discharges to fill gap</td>
+              </tr>
+              <tr>
+                <td><span class="blue">GLIDE</span></td>
+                <td>0 W (motor off)</td>
+                <td>150 W floor ✓</td>
+                <td>Charges from FC surplus</td>
+              </tr>
+              <tr>
+                <td><span class="green">COAST</span></td>
+                <td>0 W</td>
+                <td>Ramps down</td>
+                <td>Holds SOC for next lap</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="note-box" style="margin-top:10px;">
+            FC stays alive at &ge;150 W during glide — pre-loading energy and keeping membrane warm
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 3 — Inputs to Strategy G
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>Inputs to Strategy G</h2>
+      <p style="font-size:0.7em; color:var(--c-muted);">
+        Three computed quantities are passed to the controller every timestep (&Delta;t = 0.2 s)
+      </p>
+
+      <div class="col-3" style="margin-top:14px;">
+
+        <!-- Input 1: I_motor -->
+        <div class="fragment" data-fragment-index="1">
+          <div class="input-block">
+            <div class="ib-label">Input 1 — Motor Current</div>
+            <div class="ib-formula">I_motor = P_elec / U_sc</div>
+            <div class="ib-note" style="margin-top:8px;">
+              Where:<br>
+              <span class="mono teal">P_elec = I_dc_LUT × V_eff</span><br>
+              From 2D BAFANG motor LUT<br>
+              (36×35 Speed×Torque grid)
+            </div>
+          </div>
+          <p style="font-size:0.62em; color:var(--c-muted); margin-top:4px;">
+            Actual DC-bus current drawn by motor at current operating point
+          </p>
+        </div>
+
+        <!-- Input 2: U_sc -->
+        <div class="fragment" data-fragment-index="2">
+          <div class="input-block" style="border-color: var(--c-teal);">
+            <div class="ib-label" style="color:var(--c-teal);">Input 2 — SC Terminal Voltage</div>
+            <div class="ib-formula">U_sc = OCV(SOC) − I_motor × ESR</div>
+            <div class="ib-note" style="margin-top:8px;">
+              OCV (open-circuit) from energy-SOC model<br>
+              <span class="mono teal">OCV = √(V_min² + SOC×(V_max²−V_min²))</span><br>
+              ESR = 80 m&Omega; (16S/20P VINATech cells)
+            </div>
+          </div>
+          <p style="font-size:0.62em; color:var(--c-muted); margin-top:4px;">
+            Range: 40 – 60.8 V. Voltage sag at peak current:
+            <span class="mono teal">0.080&Omega; × 4.6A ≈ 0.37V (&lt;0.7%)</span>
+          </p>
+        </div>
+
+        <!-- Input 3: SOC -->
+        <div class="fragment" data-fragment-index="3">
+          <div class="input-block" style="border-color: var(--c-green);">
+            <div class="ib-label" style="color:var(--c-green);">Input 3 — State of Charge (derived)</div>
+            <div class="ib-formula">SOC = (U_sc² − V_min²) / (V_max² − V_min²)</div>
+            <div class="ib-note" style="margin-top:8px;">
+              <span class="mono green">V_min = 40.0 V, V_max = 60.8 V</span><br>
+              Energy-SOC mapping (capacitive model)<br>
+              Reference: <span class="mono green">SOC₀ = 0.60</span>
+            </div>
+          </div>
+          <p style="font-size:0.62em; color:var(--c-muted); margin-top:4px;">
+            <strong class="green">Only two voltage readings needed!</strong> SOC is never directly measured.
+          </p>
+        </div>
+      </div>
+
+      <div class="fragment panel" style="margin-top:16px; border-color: var(--c-orange);" data-fragment-index="4">
+        <div class="col-2" style="gap:16px; align-items:center;">
+          <div>
+            <h3 style="margin-top:0; font-size:0.8em; color:var(--c-orange);">State passed between timesteps</h3>
+            <div class="formula">P_fc_prev [W]  ← previous FC power output</div>
+            <p style="font-size:0.65em; margin-top:6px;">Used by the simulator for ramp-rate enforcement.
+            In the real ECU, this is a state register updated each control loop cycle.</p>
+          </div>
+          <div>
+            <h3 style="margin-top:0; font-size:0.8em; color:var(--c-muted);">Controller state (internal)</h3>
+            <div class="formula">P_filt    ← LPF accumulator (init = P_dem₀)
+integrator ← SOC-error integral [SOC·s]
+P_lap_off  ← lap supervisor offset [W]</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 4 — Signal-flow Block Diagram
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>Full Signal-Flow Block Diagram</h2>
+      <p style="font-size:0.66em; color:var(--c-muted); margin-bottom:6px;">
+        Every computation step from sensor inputs to FC power command
+      </p>
+
+      <div class="svg-wrapper">
+        <!-- Inline SVG block diagram -->
+        <svg viewBox="0 0 880 430" xmlns="http://www.w3.org/2000/svg"
+             style="width:100%; max-height:380px; display:block; margin:0 auto;">
+
+          <defs>
+            <!-- Arrow marker -->
+            <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+              <polygon points="0 0, 8 3.5, 0 7" fill="#8b949e"/>
+            </marker>
+            <marker id="arr-green" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+              <polygon points="0 0, 8 3.5, 0 7" fill="#27ae60"/>
+            </marker>
+            <marker id="arr-orange" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+              <polygon points="0 0, 8 3.5, 0 7" fill="#f39c12"/>
+            </marker>
+            <marker id="arr-red" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+              <polygon points="0 0, 8 3.5, 0 7" fill="#e74c3c"/>
+            </marker>
+            <marker id="arr-teal" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+              <polygon points="0 0, 8 3.5, 0 7" fill="#1abc9c"/>
+            </marker>
+
+            <!-- Glow filter for output -->
+            <filter id="glow-red">
+              <feGaussianBlur stdDeviation="2.5" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <!-- ── Background ── -->
+          <rect width="880" height="430" fill="#0d1117" rx="8"/>
+
+          <!-- ── COLUMN LABELS ── -->
+          <text x="62"  y="16" font-size="9" fill="#444d56" font-family="monospace">INPUTS</text>
+          <text x="200" y="16" font-size="9" fill="#444d56" font-family="monospace">FEEDFORWARD (ORANGE)</text>
+          <text x="470" y="16" font-size="9" fill="#444d56" font-family="monospace">FEEDBACK (GREEN)</text>
+          <text x="720" y="16" font-size="9" fill="#444d56" font-family="monospace">OUTPUT</text>
+
+          <!-- ═══════════════ ROW 1 — FEEDFORWARD PATH ═══════════════ -->
+
+          <!-- Box: I_motor, U_sc inputs -->
+          <rect x="10" y="30" width="110" height="48" rx="6" fill="#1a3a5c" stroke="#2980b9" stroke-width="1.5"/>
+          <text x="65" y="50" text-anchor="middle" font-size="10" fill="#5daaf5" font-family="monospace">I_motor [A]</text>
+          <text x="65" y="65" text-anchor="middle" font-size="10" fill="#5daaf5" font-family="monospace">U_sc [V]</text>
+
+          <!-- Arrow I_motor → P_motor -->
+          <line x1="120" y1="54" x2="172" y2="54" stroke="#f39c12" stroke-width="1.5" marker-end="url(#arr-orange)"/>
+
+          <!-- Box: P_motor = I × U -->
+          <rect x="173" y="30" width="132" height="48" rx="6" fill="#3d2200" stroke="#f39c12" stroke-width="1.5"/>
+          <text x="239" y="50" text-anchor="middle" font-size="9.5" fill="#f39c12" font-family="monospace">P_motor =</text>
+          <text x="239" y="66" text-anchor="middle" font-size="9.5" fill="#f39c12" font-family="monospace">I_motor × U_sc</text>
+
+          <!-- Arrow → LPF -->
+          <line x1="305" y1="54" x2="356" y2="54" stroke="#f39c12" stroke-width="1.5" marker-end="url(#arr-orange)"/>
+
+          <!-- Box: LPF -->
+          <rect x="357" y="25" width="175" height="58" rx="6" fill="#3d2200" stroke="#f39c12" stroke-width="2"/>
+          <text x="444" y="44" text-anchor="middle" font-size="9.5" fill="#f39c12" font-family="monospace" font-weight="bold">LPF (1st-order IIR)</text>
+          <text x="444" y="59" text-anchor="middle" font-size="9" fill="#e8a838" font-family="monospace">P_filt = α·P_filt +</text>
+          <text x="444" y="72" text-anchor="middle" font-size="9" fill="#e8a838" font-family="monospace">(1-α)·P_motor  τ=15s</text>
+
+          <!-- Arrow LPF → summer (right column) -->
+          <line x1="532" y1="54" x2="740" y2="54" stroke="#f39c12" stroke-width="1.5" marker-end="url(#arr-orange)"/>
+
+          <!-- ═══════════════ ROW 2 — SOC PATH ═══════════════ -->
+
+          <!-- Arrow U_sc → SOC box -->
+          <line x1="65" y1="78" x2="65" y2="105" stroke="#2980b9" stroke-width="1.5"/>
+          <line x1="65" y1="105" x2="173" y2="140" stroke="#2980b9" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- Box: SOC calculation -->
+          <rect x="173" y="118" width="175" height="46" rx="6" fill="#1a2a1a" stroke="#27ae60" stroke-width="1.5"/>
+          <text x="260" y="137" text-anchor="middle" font-size="9.5" fill="#27ae60" font-family="monospace">SOC = (U_sc²−V_min²)</text>
+          <text x="260" y="152" text-anchor="middle" font-size="9.5" fill="#27ae60" font-family="monospace">÷ (V_max²−V_min²)</text>
+
+          <!-- Arrow SOC → branch point -->
+          <line x1="348" y1="141" x2="380" y2="141" stroke="#27ae60" stroke-width="1.5"/>
+          <circle cx="383" cy="141" r="3" fill="#27ae60"/>
+
+          <!-- Branch up: → SOC error -->
+          <line x1="383" y1="141" x2="383" y2="200" stroke="#27ae60" stroke-width="1.5"/>
+          <line x1="383" y1="200" x2="426" y2="200" stroke="#27ae60" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+          <!-- Branch down: → integrator -->
+          <line x1="383" y1="141" x2="383" y2="270" stroke="#1abc9c" stroke-width="1.5"/>
+          <line x1="383" y1="270" x2="426" y2="270" stroke="#1abc9c" stroke-width="1.5" marker-end="url(#arr-teal)"/>
+
+          <!-- Box: SOC error = SOC₀ − SOC -->
+          <rect x="427" y="178" width="145" height="44" rx="6" fill="#1a2a1a" stroke="#27ae60" stroke-width="1.5"/>
+          <text x="499" y="197" text-anchor="middle" font-size="9.5" fill="#27ae60" font-family="monospace">SOC error =</text>
+          <text x="499" y="212" text-anchor="middle" font-size="9.5" fill="#27ae60" font-family="monospace">SOC₀(0.60) − SOC</text>
+
+          <!-- Arrow → K_p multiply -->
+          <line x1="572" y1="200" x2="613" y2="200" stroke="#27ae60" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+          <!-- Box: × K_p -->
+          <rect x="614" y="178" width="100" height="44" rx="6" fill="#1a2a1a" stroke="#27ae60" stroke-width="1.5"/>
+          <text x="664" y="197" text-anchor="middle" font-size="9.5" fill="#27ae60" font-family="monospace">× K_p</text>
+          <text x="664" y="213" text-anchor="middle" font-size="10" fill="#57d68e" font-family="monospace" font-weight="bold">= 2075</text>
+
+          <!-- Arrow K_p → summer -->
+          <line x1="714" y1="200" x2="754" y2="200" stroke="#27ae60" stroke-width="1.5" marker-end="url(#arr-green)"/>
+          <line x1="754" y1="200" x2="754" y2="104" stroke="#27ae60" stroke-width="1.5"/>
+
+          <!-- ═══════════════ ROW 3 — INTEGRAL PATH ═══════════════ -->
+
+          <!-- Box: SOC error × DT → Integrator -->
+          <rect x="427" y="248" width="110" height="44" rx="6" fill="#0d2a2a" stroke="#1abc9c" stroke-width="1.5"/>
+          <text x="482" y="267" text-anchor="middle" font-size="9.5" fill="#1abc9c" font-family="monospace">err × DT</text>
+          <text x="482" y="282" text-anchor="middle" font-size="9" fill="#1abc9c" font-family="monospace">→ Integrator Σ</text>
+
+          <!-- Arrow → clamp -->
+          <line x1="537" y1="270" x2="558" y2="270" stroke="#1abc9c" stroke-width="1.5" marker-end="url(#arr-teal)"/>
+
+          <!-- Box: Clamp -->
+          <rect x="559" y="248" width="105" height="44" rx="6" fill="#0d2a2a" stroke="#1abc9c" stroke-width="1.5"/>
+          <text x="611" y="267" text-anchor="middle" font-size="8.5" fill="#1abc9c" font-family="monospace">clamp</text>
+          <text x="611" y="281" text-anchor="middle" font-size="8" fill="#1abc9c" font-family="monospace">±400/K_i = ±200</text>
+
+          <!-- Arrow → × K_i -->
+          <line x1="664" y1="270" x2="685" y2="270" stroke="#1abc9c" stroke-width="1.5" marker-end="url(#arr-teal)"/>
+
+          <!-- Box: × K_i -->
+          <rect x="686" y="248" width="80" height="44" rx="6" fill="#0d2a2a" stroke="#1abc9c" stroke-width="1.5"/>
+          <text x="726" y="267" text-anchor="middle" font-size="9.5" fill="#1abc9c" font-family="monospace">× K_i</text>
+          <text x="726" y="283" text-anchor="middle" font-size="10" fill="#36d9c0" font-family="monospace" font-weight="bold">= 2</text>
+
+          <!-- Arrow K_i → summer -->
+          <line x1="766" y1="270" x2="782" y2="270" stroke="#1abc9c" stroke-width="1.5"/>
+          <line x1="782" y1="270" x2="782" y2="104" stroke="#1abc9c" stroke-width="1.5" marker-end="url(#arr-teal)"/>
+
+          <!-- ═══════════════ LAP OFFSET PATH ═══════════════ -->
+          <rect x="173" y="320" width="155" height="46" rx="6" fill="#1a1040" stroke="#9b59b6" stroke-width="1.5"/>
+          <text x="250" y="338" text-anchor="middle" font-size="9" fill="#b87fe8" font-family="monospace">Lap offset:</text>
+          <text x="250" y="353" text-anchor="middle" font-size="8.5" fill="#b87fe8" font-family="monospace">0.3×SOCerr×E_J/T_lap</text>
+          <line x1="328" y1="343" x2="766" y2="343" stroke="#9b59b6" stroke-width="1.5"/>
+          <line x1="766" y1="343" x2="766" y2="110" stroke="#9b59b6" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- ═══════════════ SUMMER / OUTPUT ═══════════════ -->
+
+          <!-- Summer circle -->
+          <circle cx="770" cy="90" r="20" fill="#1a2030" stroke="#8b949e" stroke-width="1.5"/>
+          <text x="770" y="95" text-anchor="middle" font-size="16" fill="#8b949e" font-family="monospace">Σ</text>
+
+          <!-- Label -->
+          <text x="770" y="122" text-anchor="middle" font-size="8" fill="#8b949e" font-family="monospace">LPF + K_p·e</text>
+          <text x="770" y="132" text-anchor="middle" font-size="8" fill="#8b949e" font-family="monospace">+ K_i·∫e + offset</text>
+
+          <!-- Arrow summer → clip -->
+          <line x1="790" y1="90" x2="820" y2="90" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+
+          <!-- Box: Clip 150–600 W -->
+          <rect x="821" y="68" width="50" height="44" rx="6" fill="#3a0a0a" stroke="#e74c3c" stroke-width="2"/>
+          <text x="846" y="86" text-anchor="middle" font-size="8.5" fill="#e74c3c" font-family="monospace" font-weight="bold">clip</text>
+          <text x="846" y="98" text-anchor="middle" font-size="8" fill="#e74c3c" font-family="monospace">150–</text>
+          <text x="846" y="109" text-anchor="middle" font-size="8" fill="#e74c3c" font-family="monospace">600 W</text>
+
+          <!-- Arrow → P_fc -->
+          <line x1="846" y1="112" x2="846" y2="150" stroke="#e74c3c" stroke-width="2" marker-end="url(#arr-red)"/>
+
+          <!-- FC output box -->
+          <rect x="808" y="151" width="76" height="44" rx="6" fill="#3a0a0a" stroke="#e74c3c" stroke-width="2.5" filter="url(#glow-red)"/>
+          <text x="846" y="170" text-anchor="middle" font-size="9.5" fill="#ff6b6b" font-family="monospace" font-weight="bold">P_fc [W]</text>
+          <text x="846" y="185" text-anchor="middle" font-size="8.5" fill="#ff6b6b" font-family="monospace">→ FC system</text>
+
+          <!-- ═══════════════ FLOOR / SAFETY PATH ═══════════════ -->
+
+          <!-- Diamond: I_motor < 0.1A ? -->
+          <polygon points="65,158 115,183 65,208 15,183" fill="#1a0a30" stroke="#9b59b6" stroke-width="1.5"/>
+          <text x="65" y="180" text-anchor="middle" font-size="8" fill="#b87fe8" font-family="monospace">I_motor</text>
+          <text x="65" y="192" text-anchor="middle" font-size="8" fill="#b87fe8" font-family="monospace">&lt; 0.1 A?</text>
+
+          <!-- Line from U_sc inputs to diamond -->
+          <line x1="65" y1="78" x2="65" y2="158" stroke="#9b59b6" stroke-width="1.3" stroke-dasharray="4,3"/>
+
+          <!-- YES: → 150W floor box -->
+          <text x="87" y="222" font-size="8" fill="#9b59b6" font-family="monospace">YES</text>
+          <line x1="65" y1="208" x2="65" y2="245" stroke="#9b59b6" stroke-width="1.3" marker-end="url(#arr)"/>
+
+          <rect x="18" y="246" width="95" height="36" rx="6" fill="#1a0a30" stroke="#9b59b6" stroke-width="1.5"/>
+          <text x="65" y="261" text-anchor="middle" font-size="9" fill="#b87fe8" font-family="monospace">return 150W</text>
+          <text x="65" y="274" text-anchor="middle" font-size="8" fill="#b87fe8" font-family="monospace">(FC floor)</text>
+
+          <!-- Arrow 150W → output (bypass clip) -->
+          <line x1="113" y1="264" x2="808" y2="185" stroke="#9b59b6" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#arr)"/>
+
+          <!-- NO label -->
+          <text x="118" y="180" font-size="8" fill="#9b59b6" font-family="monospace">NO →</text>
+          <text x="120" y="192" font-size="7.5" fill="#8b949e" font-family="monospace">→ normal path</text>
+
+          <!-- LEGEND -->
+          <rect x="10" y="385" width="860" height="38" rx="4" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+          <circle cx="30" cy="404" r="5" fill="#1a3a5c" stroke="#2980b9" stroke-width="1.5"/>
+          <text x="40" y="408" font-size="8.5" fill="#5daaf5" font-family="monospace">Inputs (blue)</text>
+          <circle cx="130" cy="404" r="5" fill="#3d2200" stroke="#f39c12" stroke-width="1.5"/>
+          <text x="140" y="408" font-size="8.5" fill="#f39c12" font-family="monospace">Feedforward / LPF (orange)</text>
+          <circle cx="290" cy="404" r="5" fill="#1a2a1a" stroke="#27ae60" stroke-width="1.5"/>
+          <text x="300" y="408" font-size="8.5" fill="#27ae60" font-family="monospace">SOC-P feedback (green)</text>
+          <circle cx="450" cy="404" r="5" fill="#0d2a2a" stroke="#1abc9c" stroke-width="1.5"/>
+          <text x="460" y="408" font-size="8.5" fill="#1abc9c" font-family="monospace">Integral path (teal)</text>
+          <circle cx="580" cy="404" r="5" fill="#1a1040" stroke="#9b59b6" stroke-width="1.5"/>
+          <text x="590" y="408" font-size="8.5" fill="#b87fe8" font-family="monospace">Floor / lap-offset (purple)</text>
+          <circle cx="740" cy="404" r="5" fill="#3a0a0a" stroke="#e74c3c" stroke-width="1.5"/>
+          <text x="750" y="408" font-size="8.5" fill="#e74c3c" font-family="monospace">Output clip + FC (red)</text>
+        </svg>
+      </div>
+
+      <p class="svg-caption">
+        &Delta;t = 0.2 s &nbsp;|&nbsp;
+        <span class="orange">&alpha; = e<sup>-0.2/15</sup> &approx; 0.9868</span> &nbsp;|&nbsp;
+        Anti-windup clamp: integrator &in; [&minus;200, +200] SOC&middot;s
+      </p>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 5 — The Three Correction Terms
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>The Three Correction Terms</h2>
+
+      <div class="col-3" style="margin-top:10px; gap:14px;">
+
+        <!-- Term 1: LPF Feedforward -->
+        <div class="fragment panel orange-border" data-fragment-index="1">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <div style="width:14px; height:14px; background:var(--c-orange); border-radius:3px;"></div>
+            <h3 style="margin:0; font-size:0.88em;">1. LPF Feedforward</h3>
+          </div>
+          <div class="formula">P_filt += (1-α)·(P_motor − P_filt)
+α = e^(-0.2/15) ≈ 0.9868
+τ = 15 s</div>
+          <ul style="font-size:0.65em; margin-top:10px;">
+            <li><strong>Purpose:</strong> Smoothly follows average motor demand</li>
+            <li><strong>Effect:</strong> Anchors FC near mean demand without reacting to every pulse</li>
+            <li><strong>Key insight:</strong> Without this, PI alone overshoots on every pulse and the integrator saturates</li>
+          </ul>
+          <div style="margin-top:10px; background:rgba(243,156,18,0.08); border-radius:4px; padding:6px 8px;">
+            <p style="font-size:0.62em; margin:0; color:#e8a838;">
+              τ=15s >> lap pulse time (~70s) &rarr; P_filt &approx; mean(P_motor) over several cycles
+            </p>
+          </div>
+        </div>
+
+        <!-- Term 2: K_p Proportional -->
+        <div class="fragment panel green-border" data-fragment-index="2">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <div style="width:14px; height:14px; background:var(--c-green); border-radius:3px;"></div>
+            <h3 style="margin:0; font-size:0.88em;">2. K<sub>p</sub> Proportional</h3>
+          </div>
+          <div class="formula">P_p = K_p · (SOC₀ − SOC)
+K_p = 2075 W/SOC
+SOC₀ = 0.60 (reference)</div>
+          <ul style="font-size:0.65em; margin-top:10px;">
+            <li><strong>Purpose:</strong> Immediate correction when SC drifts from reference</li>
+            <li><strong>Effect:</strong> Pulls FC output <em>down</em> when SOC &gt; 0.60 (SC overcharged)</li>
+            <li><strong>Effect:</strong> Pushes FC output <em>up</em> when SOC &lt; 0.60 (SC depleted)</li>
+          </ul>
+          <div style="margin-top:10px; background:rgba(39,174,96,0.08); border-radius:4px; padding:6px 8px;">
+            <p style="font-size:0.62em; margin:0; color:#5fe896;">
+              K_p tuned via bisection: [100 &rarr; 8000] range, converges in 2 iterations
+            </p>
+          </div>
+        </div>
+
+        <!-- Term 3: K_i Integral -->
+        <div class="fragment panel teal-border" data-fragment-index="3">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+            <div style="width:14px; height:14px; background:var(--c-teal); border-radius:3px;"></div>
+            <h3 style="margin:0; font-size:0.88em;">3. K<sub>i</sub> Integral</h3>
+          </div>
+          <div class="formula">P_i = K_i · ∫(SOC₀−SOC) dt
+K_i = 2 W/(SOC·s)
+clamp: ±400/K_i = ±200 s·SOC</div>
+          <ul style="font-size:0.65em; margin-top:10px;">
+            <li><strong>Purpose:</strong> Eliminates steady-state error; compensates lap-to-lap drift</li>
+            <li><strong>Updates</strong> <em>every</em> timestep — including glide/coast</li>
+            <li>Builds &minus;364W correction over race to offset 150W&times;170s glide energy</li>
+          </ul>
+          <div style="margin-top:10px; background:rgba(26,188,156,0.08); border-radius:4px; padding:6px 8px;">
+            <p style="font-size:0.62em; margin:0; color:#36d9c0;">
+              Widened clamp (±200 vs old ±75) is the key to charge-sustaining convergence
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="fragment" data-fragment-index="4" style="margin-top:14px;">
+        <div class="panel" style="border-color:#444d56; padding:10px 16px;">
+          <div class="col-2" style="align-items:center; gap:20px;">
+            <div>
+              <h3 style="margin:0; font-size:0.78em; color:var(--c-muted);">Combined command</h3>
+              <div class="formula" style="font-size:0.88em;">P_cmd = P_filt + K_p·(SOC₀−SOC) + K_i·∫(SOC₀−SOC)dt + P_lap_offset</div>
+            </div>
+            <div>
+              <h3 style="margin:0; font-size:0.78em; color:var(--c-muted);">Final output</h3>
+              <div class="formula" style="font-size:0.88em;">P_fc = clip(P_cmd, 150 W, 600 W)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 6 — The 150 W Floor: Why it improves efficiency
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>The 150 W Floor: Why It Improves Efficiency</h2>
+
+      <div class="bar-compare" style="margin-top:10px;">
+
+        <!-- 100W floor -->
+        <div class="bar-container" style="border-color:#666;">
+          <div class="bar-title" style="color:#888;">100 W Floor (previous)</div>
+
+          <div class="bar-row">
+            <span class="bar-lbl">Glide energy</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:55%; background:linear-gradient(90deg,#555,#888);">
+                <span class="bar-val">17,000 J/cycle</span>
+              </div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-lbl">Pulse FC target</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:82%; background:linear-gradient(90deg,#8b3a3a,#c0392b);">
+                <span class="bar-val">~490 W</span>
+              </div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-lbl">FC vs peak-η</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:70%; background:linear-gradient(90deg,#7f5010,#c07820);">
+                <span class="bar-val">490W vs 120W ideal</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:10px; font-size:0.68em; color:#888; border-top:1px solid #333; padding-top:8px;">
+            <p style="margin:3px 0;">Glide: 100 W &times; 170 s = <strong>17,000 J</strong> charged to SC each cycle</p>
+            <p style="margin:3px 0;">Pulse: FC must push ~490 W to discharge what glide charged</p>
+            <p style="margin:3px 0;">FC efficiency at 490 W: ~56% — far from peak</p>
+            <p style="margin:3px 0; color:#e74c3c; font-weight:600;">Result: 202.9 km/m³</p>
+          </div>
+        </div>
+
+        <!-- 150W floor -->
+        <div class="bar-container" style="border-color:var(--c-green);">
+          <div class="bar-title" style="color:var(--c-green);">150 W Floor (Strategy G) ✓</div>
+
+          <div class="bar-row">
+            <span class="bar-lbl">Glide energy</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:82%; background:linear-gradient(90deg,#1a5c38,#27ae60);">
+                <span class="bar-val">25,500 J/cycle</span>
+              </div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-lbl">Pulse FC target</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:43%; background:linear-gradient(90deg,#1a4a6a,#2980b9);">
+                <span class="bar-val">~256 W</span>
+              </div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <span class="bar-lbl">FC vs peak-η</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:38%; background:linear-gradient(90deg,#145a10,#27ae60);">
+                <span class="bar-val">256W — closer to efficient zone</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:10px; font-size:0.68em; color:var(--c-text); border-top:1px solid var(--c-border); padding-top:8px;">
+            <p style="margin:3px 0;">Glide: 150 W &times; 170 s = <strong>25,500 J</strong> charged to SC each cycle</p>
+            <p style="margin:3px 0;">Pulse: FC target = 620 &minus; 25,500/70 &approx; <strong>256 W</strong></p>
+            <p style="margin:3px 0;">FC efficiency at 256 W: ~59% — significantly closer to peak</p>
+            <p style="margin:3px 0; color:var(--c-green); font-weight:600;">Result: 206.8 km/m³ (+3.9 improvement)</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-2" style="gap:14px; margin-top:12px;">
+        <div class="panel orange-border" style="padding:10px 14px;">
+          <h3 style="font-size:0.78em; margin-top:0;">Energy Balance Insight</h3>
+          <p style="font-size:0.65em; margin:0; line-height:1.6;">
+            Higher floor &rarr; more glide energy pre-loaded &rarr; lower pulse demand &rarr;
+            FC operates at <span class="orange">lower, more efficient power</span> during pulse phase.
+            The SC becomes an energy buffer that shifts FC operating point toward peak efficiency.
+          </p>
+        </div>
+        <div class="panel green-border" style="padding:10px 14px;">
+          <h3 style="font-size:0.78em; margin-top:0;">Additional 150W Benefits</h3>
+          <ul style="font-size:0.63em; margin:0;">
+            <li>FC membrane stays at operating temperature — no 30–60 s cold-start delay</li>
+            <li>Avoids thermal stress from repeated cold-start cycles</li>
+            <li>Integral accumulates charge-balancing correction during glide</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 7 — Charge-Sustaining Proof & Results
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>Charge-Sustaining Proof &amp; Simulation Results</h2>
+      <p style="font-size:0.68em; color:var(--c-muted);">
+        All strategies run on identical GPS-derived race profile: 11 laps &times; 14.5 km, &Delta;t = 0.2 s,
+        H<sub>2</sub> density at STP = 89.88 g/m³
+      </p>
+
+      <table style="margin-top:8px;">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>km/m³</th>
+            <th>H₂ [g]</th>
+            <th>&Delta;SOC</th>
+            <th>Charge-Sustaining?</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight-row">
+            <td><strong>Strategy G (LPF + SOC-PI, 150W)</strong></td>
+            <td><strong>206.8</strong></td>
+            <td>6.303</td>
+            <td class="green">+0.007</td>
+            <td><span class="check">✓ YES</span></td>
+            <td>Adaptive, no cycle knowledge</td>
+          </tr>
+          <tr class="muted-row">
+            <td>PI Only (no LPF)</td>
+            <td>215.7 *</td>
+            <td>6.041</td>
+            <td class="red">&minus;0.074</td>
+            <td><span class="cross">✗ FAIL</span></td>
+            <td>*invalid — SC depletes</td>
+          </tr>
+          <tr>
+            <td>Strategy H (Fixed dispatch)</td>
+            <td>202.7</td>
+            <td>6.429</td>
+            <td class="green">+0.002</td>
+            <td><span class="check">✓ YES</span></td>
+            <td>Needs known cycle</td>
+          </tr>
+          <tr>
+            <td>Rule-Based (Hysteresis)</td>
+            <td>202.2</td>
+            <td>6.446</td>
+            <td class="green">+0.005</td>
+            <td><span class="check">✓ YES</span></td>
+            <td>Fixed thresholds</td>
+          </tr>
+          <tr>
+            <td>Strategy A (2D LUT)</td>
+            <td>201.8</td>
+            <td>6.458</td>
+            <td class="green">+0.007</td>
+            <td><span class="check">✓ YES</span></td>
+            <td>Offline optimised</td>
+          </tr>
+          <tr>
+            <td>Constant FC</td>
+            <td>201.7</td>
+            <td>6.462</td>
+            <td class="green">+0.008</td>
+            <td><span class="check">✓ YES</span></td>
+            <td>Baseline reference</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="col-2" style="gap:14px; margin-top:12px;">
+        <div class="note-box" style="margin:0;">
+          PI Only reaches 215.7 km/m³ but &Delta;SOC = &minus;0.074 — the SC drains 7.4% over the race.
+          This violates charge sustenance: it&apos;s "borrowing" SC energy to fake efficiency.
+          Strategy G is the <strong>only adaptive strategy</strong> that is both efficient AND charge-sustaining.
+        </div>
+        <div class="panel green-border" style="padding:10px 14px;">
+          <h3 style="margin-top:0; font-size:0.78em;">Bisection Convergence</h3>
+          <div class="formula" style="font-size:0.78em;">K_p search: [0, 3000]
+Iter 1: K_p=800  → ΔSOC=+0.018
+Iter 2: K_p=2075 → ΔSOC=+0.007 ✓</div>
+          <p style="font-size:0.63em; margin-top:6px;">
+            Widened PI authority clamp (±400/K_i = ±200 s&middot;SOC) enables convergence in just
+            <span class="green">2 iterations</span> — the narrower ±75 clamp required 8+ iterations.
+          </p>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 8 — Implementation & Simulink Mapping
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>Implementation &amp; Simulink Mapping</h2>
+
+      <div class="col-2" style="gap:18px; margin-top:8px;">
+
+        <!-- Left: Python function -->
+        <div>
+          <h3 style="font-size:0.82em;">Python control function signature</h3>
+          <div class="code-label">strategy_g_pi.py — make_strategy()</div>
+          <pre><code class="language-python" style="font-size:0.68em;">def strategy_fn(P_dem, SOC, P_fc_prev,
+                t_in_lap, lap_idx):
+    # 1. LPF feedforward
+    P_filt = α*P_filt + (1-α)*P_dem
+
+    # 2. SOC-PI controller
+    soc_err = 0.60 - SOC
+    integrator += soc_err * 0.2        # DT=0.2s
+    integrator = clip(integrator,
+                      -200, +200)      # anti-windup
+    P_pi = 2075*soc_err + 2*integrator
+
+    # 3. Lap supervisor (boundary detection)
+    P_lap_offset += 0.3 * E_deficit/T_lap
+
+    # 4. Combined + floor clip
+    P_cmd = P_filt + P_pi + P_lap_offset
+    return clip(P_cmd, 150, 600)       # [W]</code></pre>
+        </div>
+
+        <!-- Right: Simulink mapping -->
+        <div>
+          <h3 style="font-size:0.82em;">Simulink ECU block inputs</h3>
+          <table style="font-size:0.65em;">
+            <thead>
+              <tr><th>Signal</th><th>Source in vehicle</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono teal">I_motor_A</td>
+                <td>Hall-effect current sensor on DC bus</td>
+              </tr>
+              <tr>
+                <td class="mono teal">U_sc_V</td>
+                <td>Voltage divider on SC bank terminals</td>
+              </tr>
+              <tr>
+                <td class="mono teal">P_fc_prev</td>
+                <td>Last-step FC power command (state register)</td>
+              </tr>
+              <tr>
+                <td class="mono teal">t_in_lap</td>
+                <td>Lap timer reset at start/finish crossing</td>
+              </tr>
+              <tr>
+                <td class="mono teal">lap_idx</td>
+                <td>Lap counter (increments at start/finish)</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="panel" style="margin-top:12px; border-color:var(--c-teal);">
+            <h3 style="margin-top:0; font-size:0.78em; color:var(--c-teal);">SOC is <em>derived</em> — never directly sensed</h3>
+            <div class="formula" style="font-size:0.82em;">SOC = (U_sc² − 40²) / (60.8² − 40²)</div>
+            <p style="font-size:0.63em; margin-top:6px;">
+              Only two voltage readings required. No dedicated SOC sensor needed.
+              The capacitive energy model makes this exact (not an approximation).
+            </p>
+          </div>
+
+          <div class="panel" style="margin-top:10px; border-color:var(--c-orange);">
+            <h3 style="margin-top:0; font-size:0.78em;">Tuned Parameters Summary</h3>
+            <div class="stat-grid" style="grid-template-columns: repeat(3,1fr); gap:8px; margin:0;">
+              <div class="stat-box" style="padding:8px;">
+                <span class="stat-val orange" style="font-size:1.2em;">2075</span>
+                <span class="stat-lbl">K<sub>p</sub></span>
+              </div>
+              <div class="stat-box" style="padding:8px;">
+                <span class="stat-val teal" style="font-size:1.2em;">2</span>
+                <span class="stat-lbl">K<sub>i</sub></span>
+              </div>
+              <div class="stat-box" style="padding:8px;">
+                <span class="stat-val blue" style="font-size:1.2em;">15 s</span>
+                <span class="stat-lbl">&tau; LPF</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note-box" style="margin-top:10px;">
+        This function is line-for-line translatable to Simulink C-code blocks: each assignment maps to
+        a Gain, Sum, Saturation, or Unit Delay block. No lookup tables or external data files needed at runtime.
+      </div>
+    </section>
+
+
+    <!-- ═══════════════════════════════════════════════════════════
+         SLIDE 9 — Key Design Decisions & Lessons Learned
+    ══════════════════════════════════════════════════════════════ -->
+    <section>
+      <h2>Key Design Decisions &amp; Lessons Learned</h2>
+
+      <div class="lesson-grid" style="margin-top:10px;">
+
+        <div class="lesson-item fragment" data-fragment-index="1">
+          <div class="li-q">Why LPF + PI, not just PI?</div>
+          <div class="li-a">
+            Pure SOC-PI on a large supercapacitor (91 Wh) has slow response — the integrator
+            saturates before SOC recovers. LPF feedforward <em>anchors</em> the FC near mean demand,
+            so the PI only corrects small deviations. Together they converge; separately neither does.
+          </div>
+        </div>
+
+        <div class="lesson-item fragment" data-fragment-index="2">
+          <div class="li-q">Why 150 W floor (not lower)?</div>
+          <div class="li-a">
+            FC warm-up time: 30–60 s. Cold starts cause thermal stress and reduce membrane lifetime.
+            At 150 W, energy pre-loading during glide is large enough (~25.5 kJ/cycle) to shift
+            the pulse FC setpoint into the efficient 200–300 W zone, improving overall &eta;.
+          </div>
+        </div>
+
+        <div class="lesson-item fragment" data-fragment-index="3">
+          <div class="li-q">Why does integral update during glide/coast?</div>
+          <div class="li-a">
+            If integral only accumulates during motor-on phases (~70 s/lap), it cannot build
+            the &minus;364 W correction needed to balance the 150 W &times; 170 s glide charging.
+            Running the integrator through the full 237 s lap is <em>essential</em> for charge sustenance.
+          </div>
+        </div>
+
+        <div class="lesson-item fragment" data-fragment-index="4">
+          <div class="li-q">How was K_p tuned? (bisection)</div>
+          <div class="li-a">
+            Bisect K_p in [0, 3000]: run full 11-lap simulation, check &Delta;SOC.
+            <span class="mono">K_p=800 &rarr; &Delta;SOC=+0.018; K_p=2075 &rarr; &Delta;SOC=+0.007 ✓</span>
+            Converges in <strong class="green">2 iterations</strong> due to widened clamp (±200 s·SOC).
+          </div>
+        </div>
+
+        <div class="lesson-item fragment" data-fragment-index="5">
+          <div class="li-q">SC ESR voltage sag — does it matter?</div>
+          <div class="li-a">
+            ESR = 80 m&Omega;. At peak motor current (I &approx; 4.6 A):
+            <span class="mono">0.080 &times; 4.6 = 0.37 V</span> sag on a ~50 V bus = <strong>0.7%</strong>.
+            Modelled in simulation. Confirmed negligible — SOC calculation error &lt; 0.4%.
+          </div>
+        </div>
+
+        <div class="lesson-item fragment" data-fragment-index="6">
+          <div class="li-q">Why adaptive? (no drive-cycle dependency)</div>
+          <div class="li-a">
+            Strategies A–H are calibrated offline for the Silesia Ring profile. Strategy G
+            uses <em>only real-time measurements</em>. On race day, if the team adopts a different
+            speed profile or weather changes drag, Strategy G self-adapts — others would need re-tuning.
+          </div>
+        </div>
+
+      </div>
+
+      <div class="fragment" data-fragment-index="7" style="margin-top:14px;">
+        <div class="panel" style="border-color: var(--c-green); padding: 10px 16px;">
+          <div class="col-2" style="gap:16px; align-items:center;">
+            <div>
+              <h3 style="margin:0; font-size:0.78em; color:var(--c-green);">Final verdict</h3>
+              <p style="font-size:0.65em; margin:6px 0 0;">
+                Strategy G is the <strong class="green">best charge-sustaining strategy</strong>
+                at <strong class="green">206.8 km/m³</strong> — 4.1 km/m³ ahead of the next-best
+                CS strategy (H: 202.7). It achieves this with a simple, real-time algorithm requiring
+                no offline optimisation and only two voltage sensors.
+              </p>
+            </div>
+            <div class="stat-grid" style="grid-template-columns:1fr 1fr; gap:8px;">
+              <div class="stat-box">
+                <span class="stat-val green">206.8</span>
+                <span class="stat-lbl">km/m³ H₂</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-val teal">+0.007</span>
+                <span class="stat-lbl">&Delta;SOC (charge-neutral)</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-val orange">6.303</span>
+                <span class="stat-lbl">H₂ consumed [g]</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-val blue">2 iter</span>
+                <span class="stat-lbl">bisection convergence</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+  </div><!-- /slides -->
+</div><!-- /reveal -->
+
+
+<!-- ── Reveal.js & plugins from CDN ────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/notes/notes.js"></script>
+
+<script>
+  Reveal.initialize({
+    hash: true,
+    progress: true,
+    slideNumber: 'c/t',
+    transition: 'slide',
+    transitionSpeed: 'fast',
+    controls: true,
+    controlsTutorial: false,
+    overview: true,
+    center: false,
+    width: 1200,
+    height: 680,
+    margin: 0.04,
+    minScale: 0.4,
+    maxScale: 2.0,
+    plugins: [ RevealHighlight, RevealNotes ],
+  });
+
+  // Init Highlight.js for any code blocks not handled by Reveal plugin
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('pre code').forEach(function(block) {
+      if (!block.classList.contains('hljs')) {
+        hljs.highlightElement(block);
+      }
+    });
+  });
+</script>
+
+</body>
+</html>
