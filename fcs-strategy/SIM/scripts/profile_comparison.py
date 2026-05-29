@@ -30,11 +30,11 @@ from ems_core import (
 )
 
 # ── Vehicle constants (must match combined_best_profile.py) ────────────────────
-MASS    = 175.
+MASS    = 180.
 G       = 9.81
 CRR     = 0.006
 CD      = 0.15
-AF      = 0.8
+AF      = 1.35
 RHO     = 1.225
 H2_DENSITY = 0.0899       # kg/m³ at STP
 TOTAL_KM   = 14.5         # total race distance [km]

@@ -12,7 +12,28 @@
 > 4. **Motor iron-loss variant** is `v1` (optimistic); the main sim now prints a v1/v2/v3 km/m³ sensitivity band (≈ 200 / 164 / 139).
 > 5. **SC efficiency** `SC_ETA=0.97` is now applied as √0.97 per direction (true 3 % round-trip).
 > 6. Vehicle constants in this README corrected to match the code; 1D `motor_eta` deprecated.
-> Net effect: headline Strategy-G result moved from ~211 to **~205 km/m³** (normalised, with converter loss).
+>
+> **Vehicle update (team-confirmed) + EMS recs #2/#3:**
+> 7. **MASS 180 kg, AF 1.35 m²** (CdA ≈ 0.2025 m² — a relatively high-drag body).
+>    Average bus demand ≈ 219 W; FC-net average ≈ 230 W.
+> 8. **Strategy-G floor set to FC_P_MIN (100 W)** — membrane-safe and robust
+>    across drag regimes (never over-charges the SC).
+> 9. **#3 FC η-band cap implemented (`FC_ETA_BAND_HI` ≈ 385 W) but OFF by
+>    default.** It caps only the feedforward baseline; the SOC-PI can still exceed
+>    it. For this duty cycle the average demand is already inside the η-band, so
+>    capping merely routes peak energy through the SC (≈3 % loss) with **no net
+>    gain** (cap ON = 175.5 km/m³ but not charge-sustaining; cap OFF = 174.6,
+>    CS). Useful only for genuinely low-demand vehicles/tracks — left as opt-in.
+> 10. **#2 terrain-adaptive P&G** (`k_grade`) added and swept. On the near-flat
+>    SEM 2025 track it gives **no gain** (k_grade=60 → 170.7 vs flat 174.6) —
+>    the track is too flat (~0.3 % grade). Kept for hillier circuits.
+> 11. Lap time is dominated by the forced coast-to-stop + glide structure, so the
+>    feasible charge-sustaining band is **VH=9.0, VL=6.5, PP=800 W** (~35 min).
+>
+> **Current headline: Strategy G ≈ 174.6 km/m³** (normalised, converter loss,
+> MASS=180 kg, AF=1.35 m²). Lower than the AF=0.8 figure (~205) because of the
+> larger frontal area. The motor iron-loss assumption (v1) still dominates:
+> v1=174.6, v2=144.7, v3=123.8 km/m³.
 
 ---
 
@@ -278,10 +299,10 @@ SIM/
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `MASS` | 175 kg | Vehicle + driver mass |
+| `MASS` | 180 kg | Vehicle + driver mass (team-confirmed) |
 | `CRR` | 0.006 | Rolling resistance coefficient |
 | `CD` | 0.15 | Drag coefficient |
-| `AF` | 0.8 m² | Frontal area |
+| `AF` | 1.35 m² | Frontal area (team-confirmed; CdA = 0.2025 m²) |
 | `RHO` | 1.225 kg/m³ | Air density |
 | `G` | 9.81 m/s² | Gravitational acceleration |
 | `R_WHEEL` | 0.295 m | Wheel radius (verified: P = T·v/R) |
@@ -336,13 +357,18 @@ SIM/
 
 ### Best P&G Profile Parameters
 
+> For the high-drag (CdA≈0.20) vehicle. VH<9.0 m/s overruns the 35.5-min cap
+> (coast-to-stop + glide structure dominates lap time); higher PP is needed to
+> reach VH against the larger drag.
+
 | Parameter | Current Best | Description |
 |-----------|-------------|-------------|
 | `VH` | 9.0 m/s (32.4 km/h) | Pulse target speed |
 | `VL` | 6.5 m/s (23.4 km/h) | Glide lower bound |
-| `PP` | 700 W | Motor pulse power |
-| `V_DH` | 9.0 m/s | Downhill speed cap |
-| Cycle structure | ~65s pulse + ~95s glide + ~75s coast + 3s stop | Per lap |
+| `PP` | 800 W | Motor pulse power |
+| `V_DH` | 10.0 m/s | Downhill speed cap |
+| `k_grade` | 0 (flat best) | Terrain-adaptive gain — no gain on this near-flat track |
+| Race time | ~35.0 min | Within the 28–35.5 min window |
 
 ---
 
@@ -367,20 +393,20 @@ This script:
 - Builds the best P&G profile and runs 5 strategies (B/C/D/A/G)
 - Prints a results table and consistency checks
 
-Expected output (all PASS, all charge-sustaining). km/m³ is **charge-sustaining-
-normalised** (dSOC=0 basis) and includes the FC→bus converter loss (η=0.95):
+Expected output (km/m³ is **charge-sustaining-normalised**, includes the FC→bus
+converter loss η=0.95; vehicle MASS=180 kg, AF=1.35 m²; VH=9.0/VL=6.5/PP=700):
 ```
   Strategy           km/m³    H2[g]      dSOC   CS?
-  G  LPF+PI+150W     205.2    6.403   +0.0098   YES ★
-  A  2D-LUT          198.7    6.510   -0.0091   YES
-  B  Rule-FSM        198.7    6.521   -0.0073   YES
-  D  Const-FC        198.7    6.536   -0.0044   YES
-  C  Strat-H         198.2    6.641   +0.0124   YES
+  G  LPF+PI+floor    172.0    7.648   +0.0133   YES ★
+  B  Rule-FSM        170.5    7.563   -0.0148   YES
+  D  Const-FC        170.5    7.581   -0.0116   YES
+  A  2D-LUT          170.5    7.563   -0.0150   YES
+  C  Strat-H         170.3    7.609   -0.0077   YES
 ```
-> Note: after dSOC-normalisation the Constant/Rule/2D-LUT strategies are
-> effectively tied (~198.7) — their earlier apparent differences were
-> charge-sustaining-tolerance artefacts. Strategy G's lead (+6.5 km/m³) is the
-> only robust one, driven by running the FC continuously near its 59 %-η point.
+> Note: Strategy G wins by ~1.5 km/m³ via its LPF feedforward + SOC-PI. The
+> high-drag body keeps average demand (~230 W net) inside the FC η-band, so all
+> reasonable strategies cluster within ~2 km/m³. `run_test` uses PP=700 W; the
+> grid-search best is PP=800 W → 174.6 km/m³.
 
 ### Run the main simulation
 
@@ -446,66 +472,106 @@ All 6 strategies are implemented in `scripts/combined_best_profile.py` as
 t_in_lap, lap_idx) → P_fc [W]`.
 
 > km/m³ below are **charge-sustaining-normalised** (dSOC=0) and include the
-> FC→bus converter loss (η=0.95). At grid point VH=9.0, VL=6.5, PP=700 W.
+> FC→bus converter loss (η=0.95). Vehicle (180 kg, AF 1.35 m²), grid point
+> VH=9.0, VL=6.5, PP=800 W.
 
 | Strategy | Function | Description | Best km/m³ |
 |----------|----------|-------------|-----------|
-| **G (winner)** | `make_strat_g(K_p, K_i, tau)` | LPF feedforward + SOC-PI + lap-offset + **150 W floor always-on** | **205.2** |
-| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) table | ~198.7 |
-| Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~198.7 |
-| Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~198.7 |
-| H | `make_strat_h(P_set)` | Large-SC optimal constant dispatch + soft SOC term | ~198.2 |
-| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | n/a (not charge-sustaining) |
+| **G (winner)** | `make_strat_g(K_p, K_i, tau, p_eta_cap)` | LPF feedforward + SOC-PI + lap-offset + always-on FC floor (FC_P_MIN); optional η-band cap (#3, off) | **174.6** |
+| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) table | ~172.9 |
+| Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~172.5 |
+| Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~172.5 |
+| H | `make_strat_h(P_set)` | Large-SC optimal constant dispatch + soft SOC term | ~172.4 |
+| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | ~172.8 (not charge-sustaining) |
 
 ### Strategy G — Why it wins
 
 1. **LPF feedforward** (`tau=15 s`): FC tracks the low-pass-filtered motor power
    demand, so it anticipates load changes rather than reacting to instantaneous spikes.
 
-2. **150 W floor**: FC never drops below 150 W — not even during glide or coast-to-stop.
-   This pre-charges the SC during glide so the next pulse draws less from the SC,
-   keeping the FC closer to its 200–400 W operating band.
+2. **Always-on FC floor (FC_P_MIN = 100 W)**: FC never fully stops during glide.
+   This pre-charges the SC so the next pulse draws less from the SC. The floor is
+   set to the membrane-safe minimum — for this low-demand vehicle a higher floor
+   (e.g. the old 150 W) would over-charge the SC.
 
-3. **PI integral with ±400 W headroom**: The integral clamp `±400/K_i` allows
-   enough corrective authority to overcome the 150 W floor energy excess (~93 kJ/race).
+3. **η-band cap (#3, `FC_ETA_BAND_HI` ≈ 388 W)**: the FC command is capped at the
+   upper edge of the high-efficiency band, so the stack stays at 53–59 % η and the
+   SC buffers demand peaks. `simulate()`'s SC-floor protection overrides the cap
+   only if the SC would otherwise hit its hard floor.
 
-4. **Lap-offset correction**: At each lap boundary, the offset is nudged by
-   `0.3 × ΔSOC × E_sc / 186` — a slow feed-forward that drifts the operating
-   point toward charge sustenance over multiple laps.
+4. **PI integral + lap-offset**: integral clamp `±400/K_i` and a per-lap offset
+   nudge (`0.3 × ΔSOC × E_sc / 186`) drift the operating point toward charge
+   sustenance over multiple laps.
 
 ---
 
 ## 7. Results Summary
 
-### Final Rankings (VH=9.0, VL=6.5, PP=700 W, 11 laps, 14.5 km)
+### Final Rankings (VH=9.0, VL=6.5, PP=800 W, 11 laps, 14.5 km; MASS=180, AF=1.35)
 
 > **km/m³ are charge-sustaining-normalised (dSOC=0) and include the FC→bus
 > converter loss (η_dcdc=0.95) and the corrected SC round-trip (√0.97/dir).**
-> These supersede the earlier un-normalised, converter-free figures (~211).
+> High-drag vehicle (CdA=0.2025). These supersede the AF=0.8 figures (~205).
 
 | Rank | Strategy | km/m³ | H₂ [g] | dSOC | CS? |
 |------|----------|-------|--------|------|-----|
-| 1 | **Strategy G (150 W floor)** | **205.2** | 6.40 | +0.010 | ✓ |
-| 2 | Strategy A (2D LUT) | ~198.7 | ~6.51 | −0.009 | ✓ |
-| 2 | Rule-Based | ~198.7 | ~6.52 | −0.007 | ✓ |
-| 2 | Constant FC | ~198.7 | ~6.54 | −0.004 | ✓ |
-| 5 | Strategy H | ~198.2 | ~6.64 | +0.012 | ✓ |
-| — | PI only | n/a | — | large | ✗ |
+| 1 | **Strategy G** | **174.6** | 7.46 | +0.013 | ✓ |
+| 2 | Strategy A (2D LUT) | ~172.9 | ~7.45 | −0.016 | ✗ |
+| 3 | Constant FC | ~172.5 | ~7.61 | +0.011 | ✓ |
+| 3 | Rule-Based | ~172.5 | ~7.59 | +0.007 | ✓ |
+| 5 | Strategy H | ~172.4 | ~7.59 | +0.007 | ✓ |
+| — | PI only | ~172.8 | ~6.99 | −0.101 | ✗ |
 
-CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). After normalisation, ranks 2–4 are a
-statistical tie; only Strategy G's lead is robust.
+CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). Strategy G leads by only ~1.5 km/m³ —
+the high-drag duty cycle keeps average demand inside the FC η-band, so all
+reasonable strategies cluster tightly.
+
+### Motor iron-loss sensitivity (Strategy G, best profile)
+
+| Variant | km/m³ | Note |
+|---------|-------|------|
+| v1 (optimistic, default) | **174.6** | lowest iron loss |
+| v2 | ~144.7 | mid |
+| v3 (pessimistic) | ~123.8 | highest iron loss |
+
+> The iron-loss assumption dominates the result far more than any EMS choice
+> (±25 % vs ±1 %) — motor bench-validation remains the top priority.
+
+### EMS rec #3 — FC η-band cap (off by default)
+
+| Config | km/m³ | CS? |
+|--------|-------|-----|
+| cap OFF (default) | **174.6** | ✓ |
+| cap ON (≈385 W) | 175.5 | ✗ |
+
+> Capping the FC at the η-band edge does **not** help this vehicle: average
+> demand is already in-band, so capping only pushes peak energy through the SC
+> (≈3 % round-trip loss), cancelling the efficiency gain — and it breaks charge
+> sustenance. Left as opt-in (`p_eta_cap`) for genuinely low-demand duty cycles.
+
+### Terrain-adaptive P&G (#2) sweep
+
+| k_grade | km/m³ | dSOC | Note |
+|---------|-------|------|------|
+| 0 (flat) | **174.6** | +0.013 | best |
+| 60 | 170.7 | +0.014 | no gain |
+| 80 | 169.7 | +0.015 | no gain |
+
+> The SEM 2025 EU track is too flat (~0.3 % grade) for terrain adaptation to pay
+> off. The mechanism is implemented and ready for hillier circuits.
 
 ### P&G Grid Search Best (Strategy G, charge-sustaining)
 
-> Absolute km/m³ are ~5 % lower than the pre-fix figures because the FC→bus
-> converter loss is now modelled; the relative (VH, VL, PP) ordering is
-> essentially unchanged. Rank-1 normalised value ≈ **205.2 km/m³**. Re-run
-> `grid_search_extended.py` for the full refreshed heatmap.
+> Normalised km/m³ for the high-drag vehicle (MASS=180, AF=1.35). VH<9.0 m/s
+> overruns the 35.5-min cap. Re-run `grid_search_extended.py` for the full
+> refreshed heatmap.
 
 | Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ (normalised) |
 |------|----------|----------|--------|-------|
-| 1 | 9.0 | **6.5** | 700 | **205.2** |
-| ~ | 9.0–9.5 | 6.5–7.0 | 600–700 | ~199–205 (near-tied) |
+| 1 | 9.0 | **6.5** | 800 | **174.6** |
+| 2 | 9.0 | 7.0 | 800 | 173.3 |
+| 3 | 9.0 | 6.5 | 700 | 172.0 |
+| ~ | 9.5 | 6.5–7.5 | 600–800 | ~160–170 (faster → more drag loss) |
 
 Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 14.5 km in time including coast-to-stop phases).
@@ -527,7 +593,7 @@ Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 6 rows × 1 column:
 - Row 1: Velocity [m/s] over time — P&G pattern clearly visible (9→6.5 m/s cycles)
 - Row 2: SC SOC — should stay near 0.60, drift < 0.015 over 35 min
-- Row 3: FC power [W] — Strategy G LPF trace with 150 W floor
+- Row 3: FC power [W] — Strategy G LPF trace with FC_P_MIN (100 W) floor
 - Row 4: SC power [W] — peaks during motor pulses, negative during pre-charge
 - Row 5: Cumulative H₂ [g] — linear growth; final value → km/m³
 - Row 6: Strategy comparison bar chart

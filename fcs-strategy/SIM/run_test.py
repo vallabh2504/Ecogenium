@@ -11,7 +11,7 @@ Strategies tested:
   C-equivalent  → Strategy H      (efficiency-optimal SOC band control)
   D-equivalent  → Constant FC     (single fixed setpoint — simplest LUT)
   A             → 2D Lookup Table (bilinear interpolation on demand × SOC)
-  G             → LPF + SOC-PI    (winner — 150 W floor always-on)
+  G             → LPF + SOC-PI    (winner — FC floor always-on)
 """
 
 import sys, os
@@ -75,8 +75,10 @@ print("        Cross-model consistency check    ✓")
 print()
 
 # ── Build best P&G profile ────────────────────────────────────────────────────
+# High-drag (CdA≈0.20, AF=1.35) vehicle: VH≈9.0 m/s is the lowest band that meets
+# the 35.5-min cap (coast-to-stop + glide structure dominates lap time).
 print("  [3/3] Building P&G profile (VH=9.0 m/s, VL=6.5 m/s, PP=700 W)...")
-ta, va, Pa, sa, la, ea, ga, ca = build_profile(9.0, 6.5, 9.0, 700., 1000.)
+ta, va, Pa, sa, la, ea, ga, ca = build_profile(9.0, 6.5, 10.0, 700., 1000.)
 ok, d, dur, stops = verify(ta, va, la, silent=False)
 assert ok, f"Profile failed verify(): d={d:.2f}km dur={dur:.1f}min stops={stops}"
 P_e, _, _ = compute_motor_signals(va, ga)
@@ -125,13 +127,13 @@ km3_a = km_per_m3(r_a)
 cs_a  = abs(r_a['dSOC']) <= 0.015
 rows.append(('A  2D-LUT',      km3_a, r_a['m_H2'], r_a['dSOC'], p_a, cs_a))
 
-# --- G: LPF + SOC-PI + 150 W floor -------------------------------------------
+# --- G: LPF + SOC-PI + FC floor -------------------------------------------
 print()
-print("  G · LPF Feedforward + SOC-PI + 150 W floor  (winner)")
+print("  G · LPF Feedforward + SOC-PI + FC floor  (winner)")
 p_g, r_g = bisect_kp(P_e, la, ca, 'Strategy G')
 km3_g = km_per_m3(r_g)
 cs_g  = abs(r_g['dSOC']) <= 0.015
-rows.append(('G  LPF+PI+150W', km3_g, r_g['m_H2'], r_g['dSOC'], p_g, cs_g))
+rows.append(('G  LPF+PI+floor', km3_g, r_g['m_H2'], r_g['dSOC'], p_g, cs_g))
 
 # ── Results table ─────────────────────────────────────────────────────────────
 print()

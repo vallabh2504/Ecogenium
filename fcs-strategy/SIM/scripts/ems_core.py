@@ -53,10 +53,10 @@ RESAMPLE_HZ = 5
 DT          = 1.0 / RESAMPLE_HZ   # 0.2 s
 
 # ── Vehicle / drivetrain ───────────────────────────────────────────────────────
-_MASS   = 175.0
+_MASS   = 180.0
 _G      = 9.81
 _CD     = 0.15
-_AF     = 0.8      # m²  frontal area
+_AF     = 1.35     # m²  frontal area
 _CRR    = 0.006
 _RHO    = 1.225    # kg/m³ air density
 _ETA_DT = 0.95     # drivetrain

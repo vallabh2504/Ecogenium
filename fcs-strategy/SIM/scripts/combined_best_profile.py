@@ -22,8 +22,8 @@ from ems_core import (
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
 
-MASS=175.; G=9.81; CD=0.15; AF=0.8; CRR=0.006; RHO=1.225; ETA_DT=0.95
-GRADE_THRESH=0.006; P_RAMP_MAX=200.; V_MAX=11.0
+MASS=180.; G=9.81; CD=0.15; AF=1.35; CRR=0.006; RHO=1.225; ETA_DT=0.95
+GRADE_THRESH=0.006; P_RAMP_MAX=200.; V_MAX=13.0
 V_COAST_STOP=5./3.6   # hard brake fires at 5 km/h (user spec: 3-5 km/h)
 A_HARD=3.0
 N_STOP_STEPS=round(3./DT)
@@ -57,11 +57,17 @@ def _coast_dist(v0,s0):
         if vn==0. and v0>V_COAST_STOP: break
     return dist
 
-def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO):
+def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade=0.):
     tl=[];vl=[];Pl=[];sl=[];el=[];gl=[];coastl=[]
     t=v=s=0.; mode='PULSE'; first=True; pP=0.; was_dh=False
     while True:
         sw=s%D_LAP; grade=float(_grade_fn(sw)); elev=float(_elev_fn(sw))
+        # Terrain-adaptive P&G (EMS rec #2): shift the speed band by local grade.
+        # k_grade>0 lowers the target speed on climbs (don't fight gravity at high
+        # speed → less drag·time and less motor work) and raises it on descents
+        # (harvest gravity). k_grade=0 reproduces the fixed-band behaviour.
+        V_HI_e=float(np.clip(V_HI-k_grade*grade, V_LO+0.5, V_MAX))
+        V_LO_e=float(np.clip(V_LO-k_grade*grade, 3.0,      V_HI_e-0.3))
         rem=D_LAP-sw; Pt=0.; vc=V_MAX
         if mode not in ('COAST_TO_STOP','HARD_BRAKE') and v>0 and rem<400.:
             if rem<=_coast_dist(v,s): mode='COAST_TO_STOP'
@@ -71,16 +77,16 @@ def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO):
         elif grade<-GRADE_THRESH:
             Pt=0.; vc=V_DH; mode='GLIDE'; was_dh=True
         elif grade>+GRADE_THRESH:
-            if v>=V_HI: mode='GLIDE'; Pt=0.
+            if v>=V_HI_e: mode='GLIDE'; Pt=0.
             else: mode='PULSE'; Pt=P_BO
             vc=V_MAX; was_dh=False
         else:
-            vc=V_HI+1.
-            if was_dh and v>V_LO: mode='GLIDE'; Pt=0.
+            vc=V_HI_e+1.
+            if was_dh and v>V_LO_e: mode='GLIDE'; Pt=0.
             else:
                 was_dh=False
-                if v<=V_LO: mode='PULSE'; Pt=P_PU
-                elif v>=V_HI: mode='GLIDE'; Pt=0.
+                if v<=V_LO_e: mode='PULSE'; Pt=P_PU
+                elif v>=V_HI_e: mode='GLIDE'; Pt=0.
                 else: Pt=P_PU if mode=='PULSE' else 0.
         P=float(np.clip(Pt,pP-P_RAMP_MAX,pP+P_RAMP_MAX)); pP=P
         if not first:
@@ -101,10 +107,10 @@ def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO):
         el.append(ee);gl.append(ge);coastl.append(True);t+=DT
     return tl,vl,Pl,sl,el,gl,coastl
 
-def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.):
+def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.,k_grade=0.):
     at=[];av=[];aP=[];as_=[];aln=[];ae=[];ag=[];ac=[]; to=0.
     for lap in range(1,N_LAPS+1):
-        tl,vl,Pl,sl,el,gl,coastl=_build_lap(V_HI,V_LO,V_DH,P_PU,P_BO)
+        tl,vl,Pl,sl,el,gl,coastl=_build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade)
         ta=np.array(tl)+to
         at.append(ta);av.append(np.array(vl));aP.append(np.array(Pl))
         as_.append(np.array(sl));aln.append(np.full(len(tl),lap,dtype=int))
@@ -167,6 +173,13 @@ ETA_MAX    = float(np.max(_ETA_TAB))
 ETA_MIN    = float(np.min(_ETA_TAB[_ETA_TAB > 0]))
 # FC operating point that maximises electrical efficiency (η = P_net / (ṁH2 × LHV))
 P_PEAK_ETA = float(_P_ETA_TAB[np.argmax(_ETA_TAB)])
+# Upper edge of the high-efficiency FC band (system η ≥ 55 %). Strategy G caps
+# its FC command here so the stack stays in its efficient region and the SC
+# buffers demand peaks above it — EMS recommendation #3. (Falls back to FC_P_MAX
+# if the band can't be resolved.) For the LC 52.30 this is ≈ 388 W.
+_BAND_THRESH   = 0.55
+_band_mask     = _ETA_TAB >= _BAND_THRESH
+FC_ETA_BAND_HI = float(_P_ETA_TAB[_band_mask].max()) if _band_mask.any() else FC_P_MAX
 
 def fc_eta_arr(Pfc_arr):
     return np.interp(Pfc_arr, _P_ETA_TAB, _ETA_TAB, left=0., right=_ETA_TAB[-1])
@@ -187,9 +200,23 @@ def physics_power_demand(va, ga):
     return P_elec
 
 # ── EMS strategies ─────────────────────────────────────────────────────────────
-def make_strat_g(K_p,K_i=2.,tau=15.):
+def make_strat_g(K_p,K_i=2.,tau=15.,p_eta_cap=None):
+    """LPF feedforward + SOC-PI + lap-offset + always-on FC floor.
+
+    p_eta_cap: soft upper limit on the FC FEEDFORWARD baseline [W] (EMS rec #3 —
+    keep the FC in its high-efficiency band, let the SC buffer peaks). The SOC-PI
+    correction may still push the command above the cap up to FC_P_MAX, so charge
+    sustenance is never sacrificed. Default None → FC_P_MAX (cap OFF): for the
+    Hydraix duty cycle the average demand is already inside the η-band, so capping
+    only routes peak energy through the SC (≈3 % round-trip loss) with no net gain.
+    Pass FC_ETA_BAND_HI (≈388 W) to enable it for low-demand vehicles/tracks.
+    """
     alpha=float(np.exp(-DT/tau))
-    G_FC_MIN = 150.  # FC floor — pre-charges SC during glide, reduces pulse peaks
+    # FC glide floor = membrane-safe FC_P_MIN (100 W). Must not exceed the race-
+    # average FC demand or the SC overcharges; FC_P_MIN is safe for all regimes.
+    G_FC_MIN = float(FC_P_MIN)
+    cap = float(FC_P_MAX if p_eta_cap is None else p_eta_cap)
+    cap = min(cap, FC_P_MAX)
     st={'lpf':None,'integ':0.,'prev_lap':-1,'offset':0.}
     def fn(I_motor,U_sc,Pp,til,li):
         P_motor = I_motor * U_sc
@@ -203,7 +230,13 @@ def make_strat_g(K_p,K_i=2.,tau=15.):
         if K_i>1e-9: st['integ']=float(np.clip(st['integ'],-400./K_i,400./K_i))  # wider: allow ~400W integral correction
         if I_motor<0.1: return G_FC_MIN
         st['lpf']=alpha*st['lpf']+(1-alpha)*float(P_motor)
-        Pc=st['lpf']+st['offset']+K_p*(SC_SOC_0-SOC)+K_i*st['integ']
+        # η-band cap (#3) applies to the FEEDFORWARD baseline only. The SOC-PI
+        # correction may push beyond it (up to FC_P_MAX) so that on high-demand
+        # vehicles the FC can still recharge the SC — charge sustenance is never
+        # sacrificed for efficiency. On low-demand vehicles the baseline stays
+        # below the cap and the FC sits in its efficient band.
+        base=min(st['lpf']+st['offset'], cap)
+        Pc=base+K_p*(SC_SOC_0-SOC)+K_i*st['integ']
         return float(np.clip(Pc,G_FC_MIN,FC_P_MAX))
     return fn
 
@@ -415,10 +448,14 @@ def bisect_a(P_e,la,ca):
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 if __name__ == '__main__':
     print("=== Combined Best Profile — 35-min constraint grid search ===")
-    V_HI_vals = [8.5, 9.0]
-    V_LO_vals = [6.0, 6.5, 7.0]
-    P_PU_vals = [500., 550., 600.]
-    V_DH      = 9.0
+    # High-drag (CdA≈0.20, AF=1.35) vehicle. Lap time is dominated by the forced
+    # coast-to-stop + glide structure, so VH≈9.0 m/s is the lowest band that still
+    # meets the 35.5-min cap (VH<9 overruns it). Higher PP is needed to reach VH
+    # against the larger drag.
+    V_HI_vals = [9.0, 9.5]
+    V_LO_vals = [6.5, 7.0, 7.5]
+    P_PU_vals = [600., 700., 800.]
+    V_DH      = 10.0
 
     results = []
     for VH in V_HI_vals:
@@ -434,7 +471,7 @@ if __name__ == '__main__':
                 Kp,r = bisect_kp(P_e,la,ca,f"VH={VH} VL={VL} PP={PP}W")
                 km3  = km_per_m3(r)
                 cs   = abs(r['dSOC'])<=0.015
-                results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,H2=r['m_H2'],
+                results.append(dict(VH=VH,VL=VL,PP=PP,Kp=Kp,k_grade=0.,H2=r['m_H2'],
                                     H2n=r['m_H2_norm'],E_fc_J=r['E_fc_J'],km3=km3,
                                     dSOC=r['dSOC'],cs=cs,
                                     ta=ta,va=va,Pa=Pa,sa=sa,la=la,ea=ea,ga=ga,ca=ca,
@@ -444,10 +481,37 @@ if __name__ == '__main__':
     if not results:
         raise RuntimeError("All profiles failed verify. Adjust grid or verify bounds.")
 
-    best = max(results, key=lambda x: x['km3'])
+    # Prefer charge-sustaining profiles; only fall back to all if none qualify.
+    _cs = [r for r in results if r['cs']]
+    if not _cs:
+        print("\n  WARNING: no charge-sustaining flat profile found — ranking among all.")
+    best_flat = max(_cs or results, key=lambda x: x['km3'])
+
+    # ── Terrain-adaptive P&G sweep (EMS rec #2) on the best flat profile ────────
+    print(f"\n=== Terrain-adaptive P&G sweep (k_grade) on best flat profile ===")
+    VHb,VLb,PPb = best_flat['VH'],best_flat['VL'],best_flat['PP']
+    for kg in [20.,40.,60.,80.,120.]:
+        ta,va,Pa,sa,la,ea,ga,ca = build_profile(VHb,VLb,V_DH,PPb,1000.,k_grade=kg)
+        ok,d,dur,stops = verify(ta,va,la)
+        if not ok:
+            print(f"  SKIP k_grade={kg:.0f}  ({d:.2f}km {dur:.1f}min {stops}stops)")
+            continue
+        P_e,_,_ = compute_motor_signals(va,ga)
+        Kp,r = bisect_kp(P_e,la,ca,f"k_grade={kg:.0f}")
+        km3 = km_per_m3(r); cs = abs(r['dSOC'])<=0.015
+        print(f"  >>> k_grade={kg:.0f}  km/m³={km3:.1f}  H2={r['m_H2']:.3f}g  dSOC={r['dSOC']:+.4f}  CS={'YES' if cs else 'NO'}")
+        if cs:
+            results.append(dict(VH=VHb,VL=VLb,PP=PPb,Kp=Kp,k_grade=kg,H2=r['m_H2'],
+                                H2n=r['m_H2_norm'],E_fc_J=r['E_fc_J'],km3=km3,
+                                dSOC=r['dSOC'],cs=cs,
+                                ta=ta,va=va,Pa=Pa,sa=sa,la=la,ea=ea,ga=ga,ca=ca,
+                                SOC=r['SOC'],Pfc=r['Pfc'],Psc=r['Psc']))
+
+    _cs_all = [r for r in results if r['cs']]
+    best = max(_cs_all or results, key=lambda x: x['km3'])
     _,dur_best,_,_ = verify(best['ta'],best['va'],best['la'],silent=False)
     print(f"\n=== COMBINED BEST ===")
-    print(f"  V_HIGH={best['VH']} m/s ({best['VH']*3.6:.1f}km/h)  V_LOW={best['VL']} m/s  PP={best['PP']}W")
+    print(f"  V_HIGH={best['VH']} m/s ({best['VH']*3.6:.1f}km/h)  V_LOW={best['VL']} m/s  PP={best['PP']}W  k_grade={best.get('k_grade',0.):.0f}")
     print(f"  K_p={best['Kp']:.1f}  H2(raw)={best['H2']:.3f}g  H2(CS-norm)={best['H2n']:.3f}g  "
           f"km/m³={best['km3']:.1f}  dSOC={best['dSOC']:+.4f}")
     print(f"  (FC→bus converter η={ETA_DCDC:.2f}, SC round-trip η={SC_ETA:.2f}, motor iron-loss '{MOTOR_VARIANT}')")
@@ -459,6 +523,16 @@ if __name__ == '__main__':
         _, r_v = bisect_kp(P_e_v, best['la'], best['ca'], f"iron-loss {var}")
         print(f"  {var}: km/m³={km_per_m3(r_v):6.1f}  H2(norm)={r_v['m_H2_norm']:.3f}g  "
               f"dSOC={r_v['dSOC']:+.4f}")
+
+    # ── EMS rec #3: FC η-band cap comparison on the best profile ───────────────
+    print(f"\n=== EMS rec #3: FC η-band cap comparison (Strategy G, best profile) ===")
+    P_e_cap,_,_ = compute_motor_signals(best['va'], best['ga'])
+    for label, capv in [('cap OFF (default)', FC_P_MAX),
+                        (f'cap ON ({FC_ETA_BAND_HI:.0f} W)', FC_ETA_BAND_HI)]:
+        _, rc = _bisect_param(lambda kp: make_strat_g(kp, p_eta_cap=capv),
+                              100., 8000., P_e_cap, best['la'], best['ca'], 'K_p')
+        print(f"  {label}: km/m³={km_per_m3(rc):.1f}  dSOC={rc['dSOC']:+.4f}  "
+              f"CS={abs(rc['dSOC'])<=0.015}")
 
     # ── Save CSV ───────────────────────────────────────────────────────────────────
     df_out=pd.DataFrame({'time_s':best['ta'],'velocity_ms':best['va'],
