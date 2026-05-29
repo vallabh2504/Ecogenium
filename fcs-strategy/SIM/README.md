@@ -98,7 +98,7 @@ SIM/
     ├── profile_comparison.png         ← 3-profile benchmark
     ├── profile_velocity_comparison.png← velocity trace + speed histogram
     ├── FC_LC52_30_system_curves_v3.png← FC polarisation & efficiency curves
-    └── strategy_g_slides.html         ← Reveal.js team presentation (open in browser)
+    └── strategy_g_slides.html         ← HTML team presentation (10 slides, open in browser)
 ```
 
 ---
@@ -167,7 +167,7 @@ SIM/
 | `profile_comparison.png` | 3×3 subplot comparing Python P&G, MATLAB elev-aware, and real telemetry profiles side-by-side (velocity, SOC, FC power). |
 | `profile_velocity_comparison.png` | Lap 1 velocity traces + speed distribution histogram: Python P&G is bimodal (aggressive), MATLAB profile is unimodal (near-constant). |
 | `FC_LC52_30_system_curves_v3.png` | FC stack voltage, power, and H₂ rate vs current. Shows peak electrical efficiency at ~120 W. |
-| `strategy_g_slides.html` | Reveal.js 5 presentation (9 slides). Open in any browser. Covers inputs, block diagram, correction terms, energy balance, strategy comparison, and Simulink mapping. |
+| `strategy_g_slides.html` | Self-contained HTML deck (10 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Reflects the **current** model (174.6 km/m³, AF=1.35, FC floor 100 W). |
 
 ---
 
@@ -608,16 +608,18 @@ Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 
 ### strategy_g_slides.html
 
-9-slide Reveal.js presentation. Navigate with arrow keys or spacebar:
-1. Title + stats
-2. P&G motivation
-3. Signal derivation (I_motor, U_sc from 2D LUT)
-4. SVG block diagram (full signal flow)
-5. Three correction terms explained
-6. 150 W floor energy balance
-7. 6-strategy comparison table
-8. Simulink implementation mapping
-9. Lessons learned
+Self-contained 10-slide HTML deck (HTML PPT Studio `engineering-whiteprint` theme).
+Navigate with ← → / Space / F (fullscreen) / click; deep-link via `#/N`:
+1. Title + headline stats (174.6 km/m³)
+2. The problem & why pulse-and-glide (motor iron-loss insight)
+3. How the velocity profile was selected (P&G FSM + grid search)
+4. Velocity & elevation vs time — interactive Chart.js (lap-1 / full-race toggle)
+5. Strategy G ground-up 1/3 — inputs I_mot, U_mot, U_soc
+6. Strategy G ground-up 2/3 — term-by-term build (LPF→P→I→lap→floor)
+7. Strategy G ground-up 3/3 — animated signal-flow diagram
+8. Strategy comparison table (+ profile-type & iron-loss sensitivity)
+9. Simulink mapping (I_mot/U_mot/U_soc = Strategy block inputs)
+10. Summary & honest caveats (motor map dominates)
 
 ---
 
