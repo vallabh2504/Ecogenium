@@ -9,7 +9,7 @@
 > 1. **FC identity fixed** — the stack is a **balticFuelCells LC 52.30** (52 cells × 30 cm², ~1040 W gross), *not* a "Horizon 52 W" unit (confirmed against `FC_Manual.pdf`).
 > 2. **FC→bus DC-DC converter loss** added (`ETA_DCDC = 0.95`); `P_fc` is FC net output, bus receives `P_fc × 0.95`.
 > 3. **Charge-sustaining normalisation** — strategies are ranked on dSOC=0-normalised H₂ (`km_per_m3()` / `m_H2_norm`), removing tolerance-band artefacts.
-> 4. **Motor iron-loss variant** is `v1` (optimistic); the main sim now prints a v1/v2/v3 km/m³ sensitivity band (≈ 200 / 164 / 139).
+> 4. **Motor iron-loss variant** is `v1` (optimistic); the main sim prints a v1/v2/v3 km/m³ sensitivity band (currently 148/122/102).
 > 5. **SC efficiency** `SC_ETA=0.97` is now applied as √0.97 per direction (true 3 % round-trip).
 > 6. Vehicle constants in this README corrected to match the code; 1D `motor_eta` deprecated.
 >
@@ -24,16 +24,26 @@
 >    capping merely routes peak energy through the SC (≈3 % loss) with **no net
 >    gain** (cap ON = 175.5 km/m³ but not charge-sustaining; cap OFF = 174.6,
 >    CS). Useful only for genuinely low-demand vehicles/tracks — left as opt-in.
-> 10. **#2 terrain-adaptive P&G** (`k_grade`) added and swept. On the near-flat
->    SEM 2025 track it gives **no gain** (k_grade=60 → 170.7 vs flat 174.6) —
->    the track is too flat (~0.3 % grade). Kept for hillier circuits.
-> 11. Lap time is dominated by the forced coast-to-stop + glide structure, so the
->    feasible charge-sustaining band is **VH=9.0, VL=6.5, PP=800 W** (~35 min).
+> 10. **#2 terrain-adaptive P&G** (`k_grade`) added and swept — no gain on the
+>    near-flat SEM 2025 track (~0.3 % grade). Kept for hillier circuits.
 >
-> **Current headline: Strategy G ≈ 174.6 km/m³** (normalised, converter loss,
-> MASS=180 kg, AF=1.35 m²). Lower than the AF=0.8 figure (~205) because of the
-> larger frontal area. The motor iron-loss assumption (v1) still dominates:
-> v1=174.6, v2=144.7, v3=123.8 km/m³.
+> **Physical-feasibility update (latest):**
+> 12. **Tractive-force cap fixed.** `_net_force` previously capped force at
+>    `MASS*2 = 360 N` (≈106 Nm wheel torque, ~3× the motor). Now capped at the
+>    BAFANG LUT ceiling `TAU_MOTOR_MAX/R_WHEEL = 35 Nm/0.295 ≈ 119 N`, so peak
+>    acceleration drops from ~2.0 to ~0.6 m/s² and the profile is motor-feasible.
+> 13. **Glide-to-~1 km/h stops (no regen).** Instead of braking from 5 km/h, the
+>    car now cruise-holds to the coast point, glides to ~1 km/h, then brakes the
+>    last sliver (stopping a few m past the line). Braking loss per stop drops
+>    from ~237 J to ~7 J. *But* the slow final crawl adds ~2.5 min/race, forcing
+>    a faster cruise (VH 9.5→11.5 m/s) to meet 35.5 min — a net-negative trade
+>    under the time cap.
+>
+> **Current headline: Strategy G ≈ 148.4 km/m³** (normalised, converter loss,
+> MASS=180 kg, AF=1.35 m², feasible 35 Nm torque cap, glide-to-1km/h stops,
+> best VH=11.5 / VL=7.5 / PP=1400 W, ~34.7 min). The two physical fixes moved it
+> 174.6 → 162.8 (torque cap) → 148.4 (glide-to-stop). Motor iron-loss still
+> dominates: v1=148.4, v2=121.8, v3=102.3 km/m³.
 
 ---
 
@@ -88,7 +98,7 @@ SIM/
 │   └── strategy_g_pi.py               ← Strategy G: PI controller (earlier version)
 │
 ├── data/                              ← input/output velocity profiles
-│   ├── sem_combined_best.csv          ← CURRENT BEST profile (VH=9.0, VL=6.5, PP=700W)
+│   ├── sem_combined_best.csv          ← CURRENT BEST profile (VH=11.5, VL=7.5, PP=1400W)
 │   ├── sem_2026_elev_aware.csv        ← MATLAB elevation-aware P&G reference
 │   └── canonical_with_incline.csv     ← Real 2023/24 race telemetry (11 laps)
 │
@@ -162,12 +172,12 @@ SIM/
 
 | File | What it shows |
 |------|---------------|
-| `combined_best_result.png` | **Main result.** 6 panels: velocity profile, SC SOC, FC power, SC power, cumulative H₂, strategy comparison table. Best profile: VH=9.0, VL=6.5, PP=700 W. |
+| `combined_best_result.png` | **Main result.** 6 panels: velocity profile, SC SOC, FC power, SC power, cumulative H₂, strategy comparison table. Best profile: VH=11.5, VL=7.5, PP=1400 W. |
 | `grid_search_extended.png` | Heatmap of km/m³ over all (VH, VL) combinations at best PP. Valid cells (charge-sustaining) shown green. Red star = previous best; gold star = new best. |
 | `profile_comparison.png` | 3×3 subplot comparing Python P&G, MATLAB elev-aware, and real telemetry profiles side-by-side (velocity, SOC, FC power). |
 | `profile_velocity_comparison.png` | Lap 1 velocity traces + speed distribution histogram: Python P&G is bimodal (aggressive), MATLAB profile is unimodal (near-constant). |
 | `FC_LC52_30_system_curves_v3.png` | FC stack voltage, power, and H₂ rate vs current. Shows peak electrical efficiency at ~120 W. |
-| `strategy_g_slides.html` | Self-contained HTML deck (10 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Reflects the **current** model (174.6 km/m³, AF=1.35, FC floor 100 W). |
+| `strategy_g_slides.html` | Self-contained HTML deck (10 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Reflects the model at the time of authoring (174.6 km/m³); **superseded** — current best is 148.4 km/m³ after the torque-cap + glide-to-1km/h fixes (deck regen pending). |
 
 ---
 
@@ -357,18 +367,19 @@ SIM/
 
 ### Best P&G Profile Parameters
 
-> For the high-drag (CdA≈0.20) vehicle. VH<9.0 m/s overruns the 35.5-min cap
-> (coast-to-stop + glide structure dominates lap time); higher PP is needed to
-> reach VH against the larger drag.
+> Feasible band for the physically-correct dynamics (35 Nm torque cap +
+> glide-to-1km/h stops). VH<11 m/s overruns 35.5 min because the slow glide-to-stop
+> crawl eats time; high PP is needed to reach VH under the torque cap.
 
 | Parameter | Current Best | Description |
 |-----------|-------------|-------------|
-| `VH` | 9.0 m/s (32.4 km/h) | Pulse target speed |
-| `VL` | 6.5 m/s (23.4 km/h) | Glide lower bound |
-| `PP` | 800 W | Motor pulse power |
-| `V_DH` | 10.0 m/s | Downhill speed cap |
-| `k_grade` | 0 (flat best) | Terrain-adaptive gain — no gain on this near-flat track |
-| Race time | ~35.0 min | Within the 28–35.5 min window |
+| `VH` | 11.5 m/s (41.4 km/h) | Pulse target speed |
+| `VL` | 7.5 m/s (27.0 km/h) | Glide lower bound |
+| `PP` | 1400 W | Motor pulse power |
+| `V_DH` | 12.0 m/s | Downhill speed cap |
+| `TAU_MOTOR_MAX` | 35 Nm (→119 N) | Tractive-force cap (motor LUT ceiling) |
+| Brake speed | ~1 km/h | Glide to ~1 km/h, then brake (no regen) |
+| Race time | ~34.7 min | Within the 28–35.5 min window |
 
 ---
 
@@ -393,20 +404,19 @@ This script:
 - Builds the best P&G profile and runs 5 strategies (B/C/D/A/G)
 - Prints a results table and consistency checks
 
-Expected output (km/m³ is **charge-sustaining-normalised**, includes the FC→bus
-converter loss η=0.95; vehicle MASS=180 kg, AF=1.35 m²; VH=9.0/VL=6.5/PP=700):
+Expected output (CS-normalised km/m³, FC→bus converter loss η=0.95; MASS=180 kg,
+AF=1.35 m², feasible 35 Nm torque cap + glide-to-1km/h stops; VH=11.0/VL=7.5/PP=1200):
 ```
   Strategy           km/m³    H2[g]      dSOC   CS?
-  G  LPF+PI+floor    172.0    7.648   +0.0133   YES ★
-  B  Rule-FSM        170.5    7.563   -0.0148   YES
-  D  Const-FC        170.5    7.581   -0.0116   YES
-  A  2D-LUT          170.5    7.563   -0.0150   YES
-  C  Strat-H         170.3    7.609   -0.0077   YES
+  G  LPF+PI+floor    142.1    9.192   +0.0040   YES ★
+  A  2D-LUT          141.0    8.953   -0.0512   NO
+  B  Rule-FSM        140.0    9.293   -0.0028   YES
+  C  Strat-H         140.0    9.289   -0.0036   YES
+  D  Const-FC        139.9    9.362   +0.0086   YES
 ```
-> Note: Strategy G wins by ~1.5 km/m³ via its LPF feedforward + SOC-PI. The
-> high-drag body keeps average demand (~230 W net) inside the FC η-band, so all
-> reasonable strategies cluster within ~2 km/m³. `run_test` uses PP=700 W; the
-> grid-search best is PP=800 W → 174.6 km/m³.
+> Note: G wins narrowly (LPF + SOC-PI); A & PI-only look efficient only by
+> draining the SC (ΔSOC ≪ 0). `run_test` uses VH=11.0/PP=1200 → 142.1; the
+> grid-search best is VH=11.5/PP=1400 → 148.4 km/m³.
 
 ### Run the main simulation
 
@@ -473,11 +483,11 @@ t_in_lap, lap_idx) → P_fc [W]`.
 
 > km/m³ below are **charge-sustaining-normalised** (dSOC=0) and include the
 > FC→bus converter loss (η=0.95). Vehicle (180 kg, AF 1.35 m²), grid point
-> VH=9.0, VL=6.5, PP=800 W.
+> VH=11.5, VL=7.5, PP=1400 W (feasible torque cap + glide-to-1km/h).
 
 | Strategy | Function | Description | Best km/m³ |
 |----------|----------|-------------|-----------|
-| **G (winner)** | `make_strat_g(K_p, K_i, tau, p_eta_cap)` | LPF feedforward + SOC-PI + lap-offset + always-on FC floor (FC_P_MIN); optional η-band cap (#3, off) | **174.6** |
+| **G (winner)** | `make_strat_g(K_p, K_i, tau, p_eta_cap)` | LPF feedforward + SOC-PI + lap-offset + always-on FC floor (FC_P_MIN); optional η-band cap (#3, off) | **148.4** |
 | A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) table | ~172.9 |
 | Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~172.5 |
 | Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~172.5 |
@@ -530,9 +540,9 @@ reasonable strategies cluster tightly.
 
 | Variant | km/m³ | Note |
 |---------|-------|------|
-| v1 (optimistic, default) | **174.6** | lowest iron loss |
-| v2 | ~144.7 | mid |
-| v3 (pessimistic) | ~123.8 | highest iron loss |
+| v1 (optimistic, default) | **148.4** | lowest iron loss |
+| v2 | ~121.8 | mid |
+| v3 (pessimistic) | ~102.3 | highest iron loss |
 
 > The iron-loss assumption dominates the result far more than any EMS choice
 > (±25 % vs ±1 %) — motor bench-validation remains the top priority.
@@ -568,10 +578,10 @@ reasonable strategies cluster tightly.
 
 | Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ (normalised) |
 |------|----------|----------|--------|-------|
-| 1 | 9.0 | **6.5** | 800 | **174.6** |
-| 2 | 9.0 | 7.0 | 800 | 173.3 |
-| 3 | 9.0 | 6.5 | 700 | 172.0 |
-| ~ | 9.5 | 6.5–7.5 | 600–800 | ~160–170 (faster → more drag loss) |
+| 1 | 11.5 | **7.5** | 1400 | **148.4** |
+| 2 | 11.5 | 7.5 | 1200 | 146.3 |
+| 3 | 11.0 | 7.5 | 1400 | 142.2 |
+| ~ | 12.0 | 8.0 | 1200–1400 | ~137 (faster → more drag loss); VH<11 overruns time |
 
 Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 14.5 km in time including coast-to-stop phases).

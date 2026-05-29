@@ -75,10 +75,10 @@ print("        Cross-model consistency check    ✓")
 print()
 
 # ── Build best P&G profile ────────────────────────────────────────────────────
-# High-drag (CdA≈0.20, AF=1.35) vehicle: VH≈9.0 m/s is the lowest band that meets
-# the 35.5-min cap (coast-to-stop + glide structure dominates lap time).
-print("  [3/3] Building P&G profile (VH=9.0 m/s, VL=6.5 m/s, PP=700 W)...")
-ta, va, Pa, sa, la, ea, ga, ca = build_profile(9.0, 6.5, 10.0, 700., 1000.)
+# Physical 35 Nm torque cap + glide-to-~1km/h stops (no regen). The slow final
+# crawl forces faster cruising to meet 35.5 min: feasible band is VH≈11 m/s.
+print("  [3/3] Building P&G profile (VH=11.0 m/s, VL=7.5 m/s, PP=1200 W)...")
+ta, va, Pa, sa, la, ea, ga, ca = build_profile(11.0, 7.5, 12.0, 1200., 1400.)
 ok, d, dur, stops = verify(ta, va, la, silent=False)
 assert ok, f"Profile failed verify(): d={d:.2f}km dur={dur:.1f}min stops={stops}"
 P_e, _, _ = compute_motor_signals(va, ga)

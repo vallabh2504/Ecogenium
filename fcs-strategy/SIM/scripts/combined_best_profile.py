@@ -23,8 +23,9 @@ from ems_core import (
 )
 
 MASS=180.; G=9.81; CD=0.15; AF=1.35; CRR=0.006; RHO=1.225; ETA_DT=0.95
-GRADE_THRESH=0.006; P_RAMP_MAX=200.; V_MAX=13.0
-V_COAST_STOP=5./3.6   # hard brake fires at 5 km/h (user spec: 3-5 km/h)
+GRADE_THRESH=0.006; P_RAMP_MAX=200.; V_MAX=14.0
+TAU_MOTOR_MAX=35.0   # Nm — BAFANG RM G060.1000 peak wheel torque (LUT ceiling)
+V_COAST_STOP=1./3.6   # glide to ~1 km/h then brake (no regen → minimise KE lost to brakes)
 A_HARD=3.0
 N_STOP_STEPS=round(3./DT)
 H2_DENSITY=89.88; TOTAL_KM=14.5
@@ -44,12 +45,18 @@ def _load_route():
 D_LAP,_sr,_es,_gs,_elev_fn,_grade_fn=_load_route()
 
 def _net_force(v,P,g):
-    Fm=min(P*ETA_DT/max(v,0.3),MASS*2.) if P>0 else 0.
+    # Tractive force is limited by BOTH available power (P·η/v) AND the motor's
+    # peak wheel torque. The BAFANG LUT tops out at TAU_MOTOR_MAX (35 Nm); at the
+    # wheel that is TAU_MOTOR_MAX/R_WHEEL ≈ 119 N. The old MASS*2 = 360 N cap
+    # (≈106 Nm) was ~3× the motor's real limit and let the FSM fabricate
+    # accelerations the motor cannot supply.
+    F_max = TAU_MOTOR_MAX / R_WHEEL
+    Fm=min(P*ETA_DT/max(v,0.3), F_max) if P>0 else 0.
     return Fm - 0.5*CD*AF*RHO*v**2 - CRR*MASS*G - MASS*G*g
 
 def _coast_dist(v0,s0):
     v=v0; s=s0; dist=0.
-    while v>V_COAST_STOP and dist<500.:
+    while v>V_COAST_STOP and dist<800.:
         sw=s%D_LAP; grade=float(_grade_fn(sw))
         a=_net_force(v,0.,grade)/MASS
         vn=max(0.,v+a*DT)
@@ -57,9 +64,15 @@ def _coast_dist(v0,s0):
         if vn==0. and v0>V_COAST_STOP: break
     return dist
 
+def _hold_power(v,grade):
+    # Electrical power to hold speed v against road load (no accel) — used in the
+    # terminal zone so the car cruises (no new pulses) right up to the coast point.
+    F = 0.5*CD*AF*RHO*v*v + CRR*MASS*G + MASS*G*grade
+    return max(0., F*v/ETA_DT)
+
 def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade=0.):
     tl=[];vl=[];Pl=[];sl=[];el=[];gl=[];coastl=[]
-    t=v=s=0.; mode='PULSE'; first=True; pP=0.; was_dh=False
+    t=v=s=0.; mode='PULSE'; first=True; pP=0.; was_dh=False; term=False
     while True:
         sw=s%D_LAP; grade=float(_grade_fn(sw)); elev=float(_elev_fn(sw))
         # Terrain-adaptive P&G (EMS rec #2): shift the speed band by local grade.
@@ -69,11 +82,18 @@ def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade=0.):
         V_HI_e=float(np.clip(V_HI-k_grade*grade, V_LO+0.5, V_MAX))
         V_LO_e=float(np.clip(V_LO-k_grade*grade, 3.0,      V_HI_e-0.3))
         rem=D_LAP-sw; Pt=0.; vc=V_MAX
-        if mode not in ('COAST_TO_STOP','HARD_BRAKE') and v>0 and rem<400.:
-            if rem<=_coast_dist(v,s): mode='COAST_TO_STOP'
+        # Terminal stop logic (no regen → glide to ~1 km/h, then brake the last bit):
+        #   • latch COAST when remaining distance == natural coast distance from v;
+        #   • before that, once within the worst-case (V_HI) coast distance, stop
+        #     pulsing and HOLD speed so we don't overshoot the line still fast.
+        if mode not in ('COAST_TO_STOP','HARD_BRAKE') and v>0 and rem<800.:
+            if rem<=_coast_dist(v,s): mode='COAST_TO_STOP'; term=False
+            elif rem<=_coast_dist(V_HI_e,s): term=True
         if mode=='COAST_TO_STOP' and v<=V_COAST_STOP: mode='HARD_BRAKE'
         if mode in ('COAST_TO_STOP','HARD_BRAKE'):
             Pt=0.; vc=V_MAX
+        elif term:
+            mode='CRUISE_HOLD'; Pt=_hold_power(v,grade); vc=v   # hold speed until coast point
         elif grade<-GRADE_THRESH:
             Pt=0.; vc=V_DH; mode='GLIDE'; was_dh=True
         elif grade>+GRADE_THRESH:
@@ -100,7 +120,11 @@ def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade=0.):
             a=_net_force(v,P,grade)/MASS
             vn=float(np.clip(v+a*DT,0.,vc)); sn=s+v*DT
         t+=DT; v=vn; s=sn
-        if s>=D_LAP or (mode=='HARD_BRAKE' and v==0.) or t>700.: break
+        # In normal driving the lap ends at the line. In the terminal stop sequence we
+        # let the car finish gliding to ~1 km/h and brake (stopping a few m past the
+        # line) so almost no kinetic energy is dumped to the brakes (no regen).
+        if (s>=D_LAP and mode not in ('COAST_TO_STOP','HARD_BRAKE','CRUISE_HOLD')) \
+           or (mode=='HARD_BRAKE' and v==0.) or t>700.: break
     se=sl[-1] if sl else 0.; ee=el[-1] if el else float(_elev_fn(0)); ge=gl[-1] if gl else 0.
     for _ in range(N_STOP_STEPS):
         tl.append(t);vl.append(0.);Pl.append(0.);sl.append(se)
@@ -448,21 +472,20 @@ def bisect_a(P_e,la,ca):
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 if __name__ == '__main__':
     print("=== Combined Best Profile — 35-min constraint grid search ===")
-    # High-drag (CdA≈0.20, AF=1.35) vehicle. Lap time is dominated by the forced
-    # coast-to-stop + glide structure, so VH≈9.0 m/s is the lowest band that still
-    # meets the 35.5-min cap (VH<9 overruns it). Higher PP is needed to reach VH
-    # against the larger drag.
-    V_HI_vals = [9.0, 9.5]
-    V_LO_vals = [6.5, 7.0, 7.5]
-    P_PU_vals = [600., 700., 800.]
-    V_DH      = 10.0
+    # High-drag vehicle, physical 35 Nm torque cap, AND glide-to-~1km/h stops (no
+    # regen). The slow final crawl adds ~2.5 min/race, so the car must cruise faster
+    # to stay under 35.5 min: feasible band is now VH≈11–12 m/s with high pulse power.
+    V_HI_vals = [11.0, 11.5, 12.0]
+    V_LO_vals = [7.5, 8.0, 8.5]
+    P_PU_vals = [1200., 1400.]
+    V_DH      = 12.0
 
     results = []
     for VH in V_HI_vals:
         for VL in V_LO_vals:
             if VL >= VH-1.5: continue
             for PP in P_PU_vals:
-                ta,va,Pa,sa,la,ea,ga,ca = build_profile(VH,VL,V_DH,PP,1000.)
+                ta,va,Pa,sa,la,ea,ga,ca = build_profile(VH,VL,V_DH,PP,1200.)
                 ok,d,dur,stops = verify(ta,va,la)
                 if not ok:
                     print(f"  SKIP VH={VH} VL={VL} PP={PP}W  ({d:.2f}km {dur:.1f}min {stops}stops)")
@@ -491,7 +514,7 @@ if __name__ == '__main__':
     print(f"\n=== Terrain-adaptive P&G sweep (k_grade) on best flat profile ===")
     VHb,VLb,PPb = best_flat['VH'],best_flat['VL'],best_flat['PP']
     for kg in [20.,40.,60.,80.,120.]:
-        ta,va,Pa,sa,la,ea,ga,ca = build_profile(VHb,VLb,V_DH,PPb,1000.,k_grade=kg)
+        ta,va,Pa,sa,la,ea,ga,ca = build_profile(VHb,VLb,V_DH,PPb,1200.,k_grade=kg)
         ok,d,dur,stops = verify(ta,va,la)
         if not ok:
             print(f"  SKIP k_grade={kg:.0f}  ({d:.2f}km {dur:.1f}min {stops}stops)")
