@@ -32,7 +32,7 @@ SC_C       = 312.5    # F      bank capacitance
 SC_V_MAX   =  60.8    # V      max bus voltage  (16 × 3.8 V)
 SC_V_MIN   =  40.0    # V      min bus voltage  (16 × 2.5 V — datasheet hard limit)
 SC_ESR     =   0.080  # Ω      DC ESR: 100 mΩ/cell × 16S / 20P
-SC_ETA     =   0.97   # —      round-trip charge/discharge efficiency
+SC_ETA     =   0.97   # —      ROUND-TRIP efficiency (applied as sqrt per direction)
 SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)  # ≈ 327,600 J = 91.0 Wh
 
 # ── SOC reference points ───────────────────────────────────────────────────────
@@ -81,9 +81,11 @@ def sc_soc_update(soc, P_sc_W, dt):
     -------
     float  new SOC, clamped to [SC_SOC_MIN, SC_SOC_MAX]
 
-    Efficiency is applied asymmetrically:
-      discharge: P_effective = P_sc / η   (SC provides more than load sees)
-      charge:    P_effective = P_sc × η   (SC receives less than FC provides)
+    SC_ETA is the ROUND-TRIP efficiency, so sqrt(SC_ETA) is applied per direction:
+      discharge: P_effective = P_sc / sqrt(η)   (SC provides more than load sees)
+      charge:    P_effective = P_sc × sqrt(η)   (SC receives less than FC provides)
+    A full charge→discharge cycle then incurs exactly (1 − SC_ETA) loss.
     """
-    P_eff = P_sc_W / SC_ETA if P_sc_W > 0 else P_sc_W * SC_ETA
+    _eta_ow = SC_ETA ** 0.5
+    P_eff = P_sc_W / _eta_ow if P_sc_W > 0 else P_sc_W * _eta_ow
     return float(np.clip(soc - P_eff * dt / SC_E_J, SC_SOC_MIN, SC_SOC_MAX))

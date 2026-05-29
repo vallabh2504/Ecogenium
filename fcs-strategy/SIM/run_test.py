@@ -11,7 +11,7 @@ Strategies tested:
   C-equivalent  → Strategy H      (efficiency-optimal SOC band control)
   D-equivalent  → Constant FC     (single fixed setpoint — simplest LUT)
   A             → 2D Lookup Table (bilinear interpolation on demand × SOC)
-  G             → LPF + SOC-PI    (winner — 150 W floor always-on)
+  G             → LPF + SOC-PI    (winner — FC floor always-on)
 """
 
 import sys, os
@@ -47,7 +47,7 @@ from combined_best_profile import (
     make_strat_g, make_strat_a, make_strat_h,
     make_strat_rule, make_strat_constant, make_strat_pi,
     bisect_kp, bisect_const, bisect_pi, bisect_rule,
-    bisect_h, bisect_a,
+    bisect_h, bisect_a, km_per_m3,
     TOTAL_KM, H2_DENSITY,
 )
 print("        scripts/combined_best_profile.py ✓")
@@ -75,8 +75,10 @@ print("        Cross-model consistency check    ✓")
 print()
 
 # ── Build best P&G profile ────────────────────────────────────────────────────
+# High-drag (CdA≈0.20, AF=1.35) vehicle: VH≈9.0 m/s is the lowest band that meets
+# the 35.5-min cap (coast-to-stop + glide structure dominates lap time).
 print("  [3/3] Building P&G profile (VH=9.0 m/s, VL=6.5 m/s, PP=700 W)...")
-ta, va, Pa, sa, la, ea, ga, ca = build_profile(9.0, 6.5, 9.0, 700., 1000.)
+ta, va, Pa, sa, la, ea, ga, ca = build_profile(9.0, 6.5, 10.0, 700., 1000.)
 ok, d, dur, stops = verify(ta, va, la, silent=False)
 assert ok, f"Profile failed verify(): d={d:.2f}km dur={dur:.1f}min stops={stops}"
 P_e, _, _ = compute_motor_signals(va, ga)
@@ -97,7 +99,7 @@ rows = []
 print()
 print("  B · Rule-Based FSM  (two-level: P_hi when SOC low, P_lo when high)")
 p_b, r_b = bisect_rule(P_e, la, ca)
-km3_b = TOTAL_KM / (r_b['m_H2'] / H2_DENSITY)
+km3_b = km_per_m3(r_b)
 cs_b  = abs(r_b['dSOC']) <= 0.015
 rows.append(('B  Rule-FSM',    km3_b, r_b['m_H2'], r_b['dSOC'], p_b, cs_b))
 
@@ -105,7 +107,7 @@ rows.append(('B  Rule-FSM',    km3_b, r_b['m_H2'], r_b['dSOC'], p_b, cs_b))
 print()
 print("  C · Strategy H  (efficiency-optimal SOC band + Pset correction)")
 p_c, r_c = bisect_h(P_e, la, ca)
-km3_c = TOTAL_KM / (r_c['m_H2'] / H2_DENSITY)
+km3_c = km_per_m3(r_c)
 cs_c  = abs(r_c['dSOC']) <= 0.015
 rows.append(('C  Strat-H',     km3_c, r_c['m_H2'], r_c['dSOC'], p_c, cs_c))
 
@@ -113,7 +115,7 @@ rows.append(('C  Strat-H',     km3_c, r_c['m_H2'], r_c['dSOC'], p_c, cs_c))
 print()
 print("  D · Constant FC  (fixed setpoint — the simplest discrete LUT)")
 p_d, r_d = bisect_const(P_e, la, ca)
-km3_d = TOTAL_KM / (r_d['m_H2'] / H2_DENSITY)
+km3_d = km_per_m3(r_d)
 cs_d  = abs(r_d['dSOC']) <= 0.015
 rows.append(('D  Const-FC',    km3_d, r_d['m_H2'], r_d['dSOC'], p_d, cs_d))
 
@@ -121,17 +123,17 @@ rows.append(('D  Const-FC',    km3_d, r_d['m_H2'], r_d['dSOC'], p_d, cs_d))
 print()
 print("  A · 2D LUT  (bilinear on demand/E_sc × SOC grid)")
 p_a, r_a = bisect_a(P_e, la, ca)
-km3_a = TOTAL_KM / (r_a['m_H2'] / H2_DENSITY)
+km3_a = km_per_m3(r_a)
 cs_a  = abs(r_a['dSOC']) <= 0.015
 rows.append(('A  2D-LUT',      km3_a, r_a['m_H2'], r_a['dSOC'], p_a, cs_a))
 
-# --- G: LPF + SOC-PI + 150 W floor -------------------------------------------
+# --- G: LPF + SOC-PI + FC floor -------------------------------------------
 print()
-print("  G · LPF Feedforward + SOC-PI + 150 W floor  (winner)")
+print("  G · LPF Feedforward + SOC-PI + FC floor  (winner)")
 p_g, r_g = bisect_kp(P_e, la, ca, 'Strategy G')
-km3_g = TOTAL_KM / (r_g['m_H2'] / H2_DENSITY)
+km3_g = km_per_m3(r_g)
 cs_g  = abs(r_g['dSOC']) <= 0.015
-rows.append(('G  LPF+PI+150W', km3_g, r_g['m_H2'], r_g['dSOC'], p_g, cs_g))
+rows.append(('G  LPF+PI+floor', km3_g, r_g['m_H2'], r_g['dSOC'], p_g, cs_g))
 
 # ── Results table ─────────────────────────────────────────────────────────────
 print()

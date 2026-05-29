@@ -53,10 +53,10 @@ RESAMPLE_HZ = 5
 DT          = 1.0 / RESAMPLE_HZ   # 0.2 s
 
 # ── Vehicle / drivetrain ───────────────────────────────────────────────────────
-_MASS   = 175.0
+_MASS   = 180.0
 _G      = 9.81
 _CD     = 0.15
-_AF     = 0.8      # m²  frontal area
+_AF     = 1.35     # m²  frontal area
 _CRR    = 0.006
 _RHO    = 1.225    # kg/m³ air density
 _ETA_DT = 0.95     # drivetrain
@@ -65,6 +65,13 @@ _ETA_DT = 0.95     # drivetrain
 FC_P_MAX  = 1013.0   # W net  (37.5 A)
 FC_P_MIN  = 100.0    # W net  (idle floor — never drop below to protect membrane)
 FC_RAMP   = 100.0    # W/s    max ramp rate
+
+# ── FC → bus DC-DC boost converter ─────────────────────────────────────────────
+# The FC stack runs at ~27–46 V; the SC bus is 40–60.8 V, so a boost converter is
+# physically required between them. P_fc is the FC NET output (stack side, after
+# BOP) and also sets the stack current / H2 consumption. The bus receives
+# P_fc × ETA_DCDC. 0.95 is a representative efficiency for a ~1 kW SiC boost stage.
+ETA_DCDC  = 0.95
 
 # ── BAFANG RM G060.1000 6T 90A 48V — 61-point efficiency lookup ───────────────
 _M_POUT = np.array([
@@ -92,7 +99,14 @@ _M_POUT_S  = _M_POUT[_m_idx]
 _M_ETA_S   = _M_ETA[_m_idx]
 
 def motor_eta(p_out_W):
-    """BAFANG RM G060.1000 efficiency (0–1) from shaft output power [W]."""
+    """BAFANG RM G060.1000 efficiency (0–1) from shaft output power [W].
+
+    DEPRECATED (1D legacy path). This 1D shaft-power curve peaks at ~83 % and
+    DISAGREES with the 2D LUT (`motor_lookup_2d`, peak ~74 %) that the production
+    pipeline (`combined_best_profile.compute_motor_signals`) actually uses. It is
+    retained only for the legacy `build_demand_profile` / `simulate_race` path.
+    Prefer `motor_lookup_2d` for all new work.
+    """
     return np.interp(np.maximum(p_out_W, 0.0), _M_POUT_S, _M_ETA_S,
                      left=_M_ETA_S[0], right=_M_ETA_S[-1])
 
@@ -110,11 +124,42 @@ def _load_motor_lut():
         return RegularGridInterpolator((torques, speeds), mat,
                                        method='linear', bounds_error=False,
                                        fill_value=None)
-    return {'eta': _interp('eta_v1_pct'),
-            'I_dc': _interp('I_dc_A'),
-            'V_eff': _interp('V_eff_V')}
+    lut = {'eta': _interp('eta_v1_pct'),
+           'I_dc': _interp('I_dc_A'),
+           'V_eff': _interp('V_eff_V')}
+    # DC input-power interpolators for each iron-loss variant. The production
+    # pipeline uses v1 (lowest iron loss → highest efficiency, optimistic).
+    # v2/v3 are higher-iron-loss models, exposed for sensitivity analysis.
+    # Note: I_dc × V_eff == P_in_v1 by construction, so 'v1' reproduces the
+    # legacy I_dc·V_eff demand exactly.
+    for v in ('v1', 'v2', 'v3'):
+        col = f'P_in_{v}_W'
+        if col in df.columns:
+            lut[f'P_in_{v}'] = _interp(col)
+    return lut
 
 _MOTOR_LUT = _load_motor_lut()
+
+# Default motor iron-loss variant used by the production demand pipeline.
+# 'v1' is the most optimistic (lowest iron loss). Change to 'v2'/'v3' to study
+# sensitivity to the iron-loss assumption.
+MOTOR_VARIANT = 'v1'
+
+def motor_power_2d(speed_kmh, torque_nm, variant=None):
+    """DC input power [W] from the 2D LUT for a given iron-loss variant.
+
+    variant ∈ {'v1','v2','v3'}; defaults to MOTOR_VARIANT ('v1').
+    Returns 0 for coast/stop points (zero torque or zero speed).
+    """
+    variant = variant or MOTOR_VARIANT
+    spd = np.atleast_1d(np.asarray(speed_kmh, float))
+    trq = np.atleast_1d(np.asarray(torque_nm, float))
+    moving = (trq > 0.05) & (spd > 0.5)
+    pts = np.column_stack([np.clip(trq, 1., 35.), np.clip(spd, 5., 40.)])
+    key = f'P_in_{variant}'
+    if key not in _MOTOR_LUT:
+        raise KeyError(f"motor variant '{variant}' not in LUT")
+    return np.where(moving, _MOTOR_LUT[key](pts), 0.)
 
 def motor_lookup_2d(speed_kmh, torque_nm):
     """2D BAFANG LUT: (Speed_kmh, Torque_Nm) → (I_dc_A, V_eff_V, eta).
@@ -136,6 +181,11 @@ def _movmean(x, w):
 def build_demand_profile():
     """
     Build one-lap electrical demand at 5 Hz, GPS-calibrated to 14.5/11 km/lap.
+
+    DEPRECATED (legacy path). Uses the 1D `motor_eta` curve and the noisy
+    canonical telemetry. The production pipeline instead uses
+    `combined_best_profile.build_profile` + `compute_motor_signals` (2D LUT).
+    Retained for backward compatibility / `simulate_race` only.
 
     Returns
     -------
@@ -242,12 +292,13 @@ ECMS_DENOM = ETA_FC_REF * LHV_H2                          # ≈ 50 000 W/(g/s)
 #   V_max  = 16 × 3.8  = 60.8 V
 #   V_min  = 16 × 2.5  = 40.0 V  (cell datasheet minimum: 2.5 V)
 #   C_bank = 20 × 250F / 16 = 312.5 F
-#   ESR    ≈ (16 × 3 mΩ_cell) / 20 ≈ 2.4 mΩ  (estimated; confirm from datasheet)
+#   ESR    = 100 mΩ/cell × 16S / 20P = 80 mΩ  (VINATech DC ESR datasheet value)
 SC_C       = 312.5    # F
 SC_V_MAX   =  60.8    # V
 SC_V_MIN   =  40.0    # V   (cell minimum 2.5 V × 16S)
 SC_ESR     = 0.080    # Ω  — VINATech DC ESR: 100 mΩ/cell × 16S / 20P
-SC_ETA     = 0.97     # round-trip efficiency
+SC_ETA     = 0.97     # ROUND-TRIP efficiency (charge×discharge); applied as
+                      # sqrt(SC_ETA) per direction in sc_soc_update()
 SC_E_J     = 0.5 * SC_C * (SC_V_MAX**2 - SC_V_MIN**2)   # ≈ 327 600 J = 91.0 Wh
 
 SC_SOC_0   = 0.60     # initial & reference SOC
@@ -271,11 +322,14 @@ def sc_soc_update(soc, P_sc_W, dt):
     Sign convention:  P_sc > 0  → SC discharging (supplying load)
                       P_sc < 0  → SC charging (absorbing FC surplus)
 
-    Converter efficiency η_sc is applied asymmetrically:
-      discharge: SC must provide more energy → P_effective = P_sc / η_sc
-      charge:    SC receives less energy     → P_effective = P_sc * η_sc
+    SC_ETA is the ROUND-TRIP efficiency, so the one-way (per-direction) factor is
+    sqrt(SC_ETA). Loss is applied symmetrically each direction:
+      discharge: SC must provide more energy → P_effective = P_sc / sqrt(η_sc)
+      charge:    SC receives less energy     → P_effective = P_sc * sqrt(η_sc)
+    A full charge→discharge cycle then incurs exactly (1 − SC_ETA) loss.
     """
-    P_eff = P_sc_W / SC_ETA if P_sc_W > 0 else P_sc_W * SC_ETA
+    _eta_ow = SC_ETA ** 0.5
+    P_eff = P_sc_W / _eta_ow if P_sc_W > 0 else P_sc_W * _eta_ow
     return float(np.clip(soc - P_eff * dt / SC_E_J, SC_SOC_MIN, SC_SOC_MAX))
 
 
@@ -365,13 +419,15 @@ def simulate_race(strategy_fn, SOC_0=SC_SOC_0, verbose=False, fc_can_off=False):
                                      P_fc_prev + FC_RAMP * DT))
         P_fc_cmd = float(np.clip(P_fc_cmd, P_min, FC_P_MAX))
 
-        P_sc_k = Pd - P_fc_cmd
+        # FC delivers P_fc_cmd × ETA_DCDC to the bus (boost-converter loss).
+        # P_fc_cmd remains the stack-side net output (sets current / H2).
+        P_sc_k = Pd - P_fc_cmd * ETA_DCDC
 
         # ── SC floor protection: force FC max before SC hits hard floor ─────
         trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
         if P_sc_k > 0 and trial_soc <= SC_SOC_MIN:
-            P_fc_cmd = float(np.clip(Pd, P_min, FC_P_MAX))
-            P_sc_k   = max(0.0, Pd - P_fc_cmd)
+            P_fc_cmd = float(np.clip(Pd / ETA_DCDC, P_min, FC_P_MAX))
+            P_sc_k   = max(0.0, Pd - P_fc_cmd * ETA_DCDC)
             trial_soc = sc_soc_update(soc_k, P_sc_k, DT)
 
         P_fc_ar[k]   = P_fc_cmd
