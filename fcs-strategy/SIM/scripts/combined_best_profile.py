@@ -25,7 +25,8 @@ from ems_core import (
 MASS=180.; G=9.81; CD=0.15; AF=1.35; CRR=0.006; RHO=1.225; ETA_DT=0.95
 GRADE_THRESH=0.006; P_RAMP_MAX=200.; V_MAX=14.0
 TAU_MOTOR_MAX=35.0   # Nm — BAFANG RM G060.1000 peak wheel torque (LUT ceiling)
-V_COAST_STOP=1./3.6   # glide to ~1 km/h then brake (no regen → minimise KE lost to brakes)
+V_COAST_STOP=7./3.6   # coast, then brake from 7 km/h (swept optimum: max km/m³;
+                      # hard-brake distance ≈0.63 m @ A_HARD. Lower→long crawl forces fast cruise; higher→more KE lost)
 A_HARD=3.0
 N_STOP_STEPS=round(3./DT)
 H2_DENSITY=89.88; TOTAL_KM=14.5
@@ -82,7 +83,7 @@ def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade=0.):
         V_HI_e=float(np.clip(V_HI-k_grade*grade, V_LO+0.5, V_MAX))
         V_LO_e=float(np.clip(V_LO-k_grade*grade, 3.0,      V_HI_e-0.3))
         rem=D_LAP-sw; Pt=0.; vc=V_MAX
-        # Terminal stop logic (no regen → glide to ~1 km/h, then brake the last bit):
+        # Terminal stop logic (no regen → coast, then brake from V_COAST_STOP):
         #   • latch COAST when remaining distance == natural coast distance from v;
         #   • before that, once within the worst-case (V_HI) coast distance, stop
         #     pulsing and HOLD speed so we don't overshoot the line still fast.
@@ -121,8 +122,8 @@ def _build_lap(V_HI,V_LO,V_DH,P_PU,P_BO,k_grade=0.):
             vn=float(np.clip(v+a*DT,0.,vc)); sn=s+v*DT
         t+=DT; v=vn; s=sn
         # In normal driving the lap ends at the line. In the terminal stop sequence we
-        # let the car finish gliding to ~1 km/h and brake (stopping a few m past the
-        # line) so almost no kinetic energy is dumped to the brakes (no regen).
+        # let the car finish coasting to V_COAST_STOP and brake (stopping a few m past
+        # the line) so the kinetic energy dumped to the brakes is minimised (no regen).
         if (s>=D_LAP and mode not in ('COAST_TO_STOP','HARD_BRAKE','CRUISE_HOLD')) \
            or (mode=='HARD_BRAKE' and v==0.) or t>700.: break
     se=sl[-1] if sl else 0.; ee=el[-1] if el else float(_elev_fn(0)); ge=gl[-1] if gl else 0.
@@ -475,10 +476,12 @@ if __name__ == '__main__':
     # High-drag vehicle, physical 35 Nm torque cap, AND glide-to-~1km/h stops (no
     # regen). The slow final crawl adds ~2.5 min/race, so the car must cruise faster
     # to stay under 35.5 min: feasible band is now VH≈11–12 m/s with high pulse power.
-    V_HI_vals = [11.0, 11.5, 12.0]
-    V_LO_vals = [7.5, 8.0, 8.5]
+    # Brake-from-7km/h (swept optimum). Shorter coast than glide-to-1km/h, so the
+    # feasible cruise band drops back to VH≈9.5–10.5 m/s.
+    V_HI_vals = [9.5, 10.0, 10.5]
+    V_LO_vals = [6.0, 6.5, 7.0]
     P_PU_vals = [1200., 1400.]
-    V_DH      = 12.0
+    V_DH      = 10.5
 
     results = []
     for VH in V_HI_vals:
