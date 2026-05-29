@@ -180,7 +180,7 @@ SIM/
 | `profile_comparison.png` | 3×3 subplot comparing Python P&G, MATLAB elev-aware, and real telemetry profiles side-by-side (velocity, SOC, FC power). |
 | `profile_velocity_comparison.png` | Lap 1 velocity traces + speed distribution histogram: Python P&G is bimodal (aggressive), MATLAB profile is unimodal (near-constant). |
 | `FC_LC52_30_system_curves_v3.png` | FC stack voltage, power, and H₂ rate vs current. Shows peak electrical efficiency at ~120 W. |
-| `strategy_g_slides.html` | Self-contained HTML deck (10 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Reflects the model at the time of authoring (174.6 km/m³); **superseded** — current best is 165.3 km/m³ after the torque-cap fix and coast-then-brake @ 7 km/h (deck regen pending). |
+| `strategy_g_slides.html` | Self-contained HTML deck (10 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Reflects the current model: 165.3 km/m³, VH 10.0 / VL 6.0 / PP 1400, brake @ 7 km/h, feasible 35 Nm torque cap. |
 
 ---
 
