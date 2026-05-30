@@ -621,18 +621,19 @@ Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 
 ### strategy_g_slides.html
 
-Self-contained 10-slide HTML deck (HTML PPT Studio `engineering-whiteprint` theme).
+Self-contained 11-slide HTML deck (HTML PPT Studio `engineering-whiteprint` theme).
 Navigate with ← → / Space / F (fullscreen) / click; deep-link via `#/N`:
-1. Title + headline stats (174.6 km/m³)
+1. Title + headline stats (165.3 km/m³)
 2. The problem & why pulse-and-glide (motor iron-loss insight)
 3. How the velocity profile was selected (P&G FSM + grid search)
 4. Velocity & elevation vs time — interactive Chart.js (lap-1 / full-race toggle)
-5. Strategy G ground-up 1/3 — inputs I_mot, U_mot, U_soc
-6. Strategy G ground-up 2/3 — term-by-term build (LPF→P→I→lap→floor)
-7. Strategy G ground-up 3/3 — animated signal-flow diagram
-8. Strategy comparison table (+ profile-type & iron-loss sensitivity)
-9. Simulink mapping (I_mot/U_mot/U_soc = Strategy block inputs)
-10. Summary & honest caveats (motor map dominates)
+5. Driver guide — Silesia Ring flag map (1–7) + per-flag driver actions
+6. Strategy G ground-up 1/3 — inputs I_mot, U_mot, U_soc
+7. Strategy G ground-up 2/3 — term-by-term build (LPF→P→I→lap→floor)
+8. Strategy G ground-up 3/3 — animated signal-flow diagram
+9. Strategy comparison table (+ brake-speed sweep & iron-loss sensitivity)
+10. Simulink mapping (I_mot/U_mot/U_soc = Strategy block inputs)
+11. Summary & honest caveats (motor map dominates)
 
 ---
 
