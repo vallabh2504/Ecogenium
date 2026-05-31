@@ -17,7 +17,7 @@ from scipy.interpolate import interp1d, RegularGridInterpolator
 from ems_core import (
     FC_P_MIN, FC_P_MAX, FC_RAMP, LHV_H2, ETA_DCDC,
     SC_C, SC_V_MAX, SC_V_MIN, SC_E_J, SC_ETA, SC_SOC_0, SC_SOC_MIN, SC_SOC_MAX,
-    K_H2, fc_current, fc_h2_rate, sc_soc_update, sc_voltage,
+    K_H2, ECMS_DENOM, fc_current, fc_h2_rate, sc_soc_update, sc_voltage,
     sc_terminal_voltage, motor_lookup_2d, motor_power_2d, MOTOR_VARIANT, R_WHEEL,
     N_LAPS, DT, MATLAB_DIR, RESULTS_DIR,
 )
@@ -356,6 +356,61 @@ def make_strat_a(K_soc, P_base=200.):
         soc_c = float(np.clip(SOC, soc_grid[0], soc_grid[-1]))
         return float(_interp([[u, soc_c]])[0])
     return fn
+
+def make_strat_dems(s0, w=0., K_s=4.0, P_lo=150., P_hi=600.):
+    """Strategy D-ECMS — Durability-weighted ECMS with damped SOC-PI co-state.
+
+    Per step minimises  H(P_fc) = mH2(P_fc) + s_eff*(P_dem - P_fc*ETA_DCDC)/ECMS_DENOM
+                                  + w*c_deg(P_fc, P_fc_prev)
+    The equivalence factor is closed-loop on SOC (damped A-ECMS):
+        s_eff = clip( s0 + K_s*(SOC0-SOC) + K_si*∫(SOC0-SOC)dt , 0.3, 3.0 )
+    The integral (anti-wound) gives charge-sustaining robustness to imperfect/varying
+    laps (uses MEASURED demand + SOC, no stored plan); the clamp + modest gains keep
+    it off the twitchy ECMS breakeven so it doesn't overshoot like a P-only co-state.
+    c_deg is convex (penalises idle <P_lo, high power >P_hi, and ramping): it parks
+    the FC at a near-constant high-η / low-stress point — which both smooths the stack
+    AND lowers H2 (constant operation has lower mean current than floor+pulse on the
+    convex I-P curve). w=0 → plain ECMS. Drop-in fn(...)->P_fc, same interface as G.
+    """
+    Pg   = np.concatenate([[0.0], np.linspace(FC_P_MIN, FC_P_MAX, 90)])
+    mdot = np.where(Pg>=FC_P_MIN, K_H2*fc_current(np.clip(Pg,FC_P_MIN,FC_P_MAX)), 0.0)
+    cdeg0= (np.maximum(0.,P_lo-Pg)/100.)**2 + (np.maximum(0.,Pg-P_hi)/100.)**2
+    def fn(I_motor,U_sc,Pp,til,li):
+        SOC   = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        P_dem = float(I_motor*U_sc)
+        s_eff = float(np.clip(s0 + K_s*(SC_SOC_0-SOC), 0.3, 3.0))
+        P_sc  = P_dem - Pg*ETA_DCDC
+        H     = mdot + s_eff*P_sc/ECMS_DENOM + w*(cdeg0 + ((Pg-Pp)/150.)**2)
+        return float(Pg[int(np.argmin(H))])
+    return fn
+
+def make_strat_cc(P_set, K_p=3000., K_i=2.):
+    """Strategy CC — Constant-Continuous FC at the efficient point + SOC-PI trim.
+
+    Commands a near-CONSTANT FC power P_set the whole race (never returns 0, even
+    motor-off — keeps charging the SC), so the FC sits at one high-efficiency point
+    instead of G's floor↔pulse swing. On the convex I-P curve, constant operation
+    has lower mean current → less H2 for the SAME FC energy (~+6% km/m³). The outer
+    SOC-PI (clamped) provides robust charge-sustenance under imperfect/varying laps;
+    the 91 Wh SC buffers all pulse/glide transients passively. Drop-in fn(...)->P_fc.
+    """
+    st={'integ':0.}
+    def fn(I_motor,U_sc,Pp,til,li):
+        SOC = (U_sc**2 - SC_V_MIN**2) / (SC_V_MAX**2 - SC_V_MIN**2)
+        st['integ'] = float(np.clip(st['integ'] + (SC_SOC_0-SOC)*DT, -300./max(K_i,1e-9), 300./max(K_i,1e-9)))
+        return float(np.clip(P_set + K_p*(SC_SOC_0-SOC) + K_i*st['integ'], FC_P_MIN, FC_P_MAX))
+    return fn
+
+def durability_metrics(Pfc):
+    """FC-stress metrics for a P_fc trace: ramp activity, idle dwell, FC-η, spread."""
+    on=Pfc[Pfc>=FC_P_MIN]
+    if len(on)==0: return dict(sigma=0.,ramp=0.,idle=0.,eta=0.,pmean=0.)
+    dP=np.diff(Pfc)/DT
+    return dict(sigma=float(np.std(on)),
+                ramp=float(np.mean(np.abs(dP))),
+                idle=100.*float(np.mean(on<=FC_P_MIN+5.)),
+                eta=float(np.mean(fc_eta_arr(on))*100.),
+                pmean=float(np.mean(on)))
 
 def simulate(fn,P_elec_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
     """
