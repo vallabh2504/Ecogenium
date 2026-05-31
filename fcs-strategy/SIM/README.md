@@ -98,7 +98,7 @@ SIM/
 │   ├── strategy_d_lut4x4.py           ← Strategy D: 4×4 LUT
 │   ├── strategy_e_aecms.py            ← Strategy E: Adaptive ECMS
 │   ├── strategy_f_lpf.py              ← Strategy F: LPF feedforward only
-│   └── strategy_g_pi.py               ← Strategy G: PI controller (earlier version)
+│   └── strategy_g.py                  ← Strategy G (production: I_motor,U_sc → P_fc) — clean, shareable ★
 │
 ├── data/                              ← input/output velocity profiles
 │   ├── sem_combined_best.csv          ← CURRENT BEST profile (VH=10.0, VL=6.0, PP=1400W)
@@ -161,7 +161,7 @@ SIM/
 | `strategy_d_lut4x4.py` | 4×4 lookup table indexed by (SOC band, power band). | Old | Reference |
 | `strategy_e_aecms.py` | Adaptive ECMS — updates equivalence factor online based on SOC drift. | Old | Reference |
 | `strategy_f_lpf.py` | LPF feedforward only (no PI). FC tracks low-pass-filtered motor power. | Old | Reference |
-| `strategy_g_pi.py` | Earlier Strategy G without the 150 W floor. Produces ~202 km/m³. | Old | Reference |
+| `strategy_g.py` | **Production Strategy G** — clean, self-contained controller: inputs `I_motor`, `U_sc` → output `P_fc [W]`. Byte-identical to the harness's `make_strat_g` (165.3 km/m³, charge-sustaining). Shareable / Simulink-translatable. |
 
 ### data/
 
