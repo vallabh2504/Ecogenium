@@ -34,8 +34,8 @@ How it works (three additive terms + a floor)
 SOC is DERIVED from U_sc — no dedicated SOC sensor:
         SOC = (U_sc² − V_min²) / (V_max² − V_min²)
 
-Result on the SEM-Poland (Silesia Ring) profile: ≈165.3 km/m³, charge-sustaining
-(ΔSOC ≈ 0). This is the production controller used in the project's results.
+Result on the SEM-Poland (Silesia Ring) profile with the measured motor map:
+≈239 km/m³, charge-sustaining (ΔSOC ≈ 0). Production controller for the project.
 
 Simulink mapping (block-for-block)
 ----------------------------------

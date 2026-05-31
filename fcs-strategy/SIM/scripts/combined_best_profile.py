@@ -30,9 +30,33 @@ V_COAST_STOP=7./3.6   # coast, then brake from 7 km/h (swept optimum: max km/m³
 A_HARD=3.0
 N_STOP_STEPS=round(3./DT)
 H2_DENSITY=89.88; TOTAL_KM=14.5
+MOTOR_V=48.0    # motor is always fed 48 V (user spec): I_mot = P_dem / 48
 
 _THIS = os.path.dirname(os.path.abspath(__file__))
 ROUTE_CSV = os.path.join(_THIS,'..','datasheets','sem_2025_eu.csv')
+
+# ── Motor efficiency map: OUTPUT(wheel) RPM × OUTPUT torque → η  [team xlsx] ───
+# BAFANG RM G060.1000 6T 90A 48V (5:1 planetary gearbox). The table is referenced
+# at the OUTPUT shaft (post-gearbox = wheel for this hub/direct layout): RPM and
+# torque computed from vehicle dynamics map straight in; η already folds in gearbox
+# + motor losses. Verified: 378 RPM → 42.04 km/h (matches the sheet's Quick Reference).
+_MOTOR_XLSX = os.path.join(_THIS,'..','datasheets','motor_eff_rpm_torque.xlsx')
+def _load_motor_eta():
+    df = pd.read_excel(_MOTOR_XLSX, sheet_name='Efficiency Lookup')
+    tq  = np.array([float(c) for c in df.columns[1:]])      # torque axis [Nm]
+    rp  = df.iloc[:,0].values.astype(float)                 # output RPM axis
+    eta = df.iloc[:,1:].values.astype(float) / 100.0        # efficiency [0–1]
+    itp = RegularGridInterpolator((rp,tq), eta, method='linear',
+                                  bounds_error=False, fill_value=None)
+    return itp, (float(rp.min()),float(rp.max())), (float(tq.min()),float(tq.max()))
+_MOTOR_ETA, _RPM_RNG, _TQ_RNG = _load_motor_eta()
+RPM_PER_MS = 60.0/(2*np.pi)/0.295   # output RPM per m/s (wheel radius 0.295 m)
+
+def motor_eta_rt(rpm, torque):
+    """Motor system efficiency η(0–1) at output RPM & output torque (clipped to map)."""
+    rp = np.clip(np.atleast_1d(np.asarray(rpm,float)),  _RPM_RNG[0], _RPM_RNG[1])
+    tq = np.clip(np.atleast_1d(np.asarray(torque,float)),_TQ_RNG[0], _TQ_RNG[1])
+    return _MOTOR_ETA(np.column_stack([rp, tq]))
 
 def _load_route():
     df=pd.read_csv(ROUTE_CSV); df.columns=[c.strip() for c in df.columns]
@@ -154,27 +178,31 @@ def build_profile(V_HI,V_LO,V_DH,P_PU=500.,P_BO=1000.,k_grade=0.):
     return ta,vs,Pa,sa,la,ea,ga,ca
 
 def compute_motor_signals(va, ga, variant=None):
-    """Vehicle dynamics → electrical demand via 2D BAFANG LUT.
-    Returns P_elec [W], V_eff [V], Torque_Nm [Nm] (arrays, length=len(va)).
+    """Vehicle dynamics → motor electrical demand P_dem [W] via the RPM×Torque
+    efficiency map (team xlsx, output/wheel-referenced).
 
-    P_elec is the DC bus power drawn by the motor controller, taken from the
-    LUT's P_in column for the selected iron-loss variant (default 'v1', the
-    most optimistic / lowest-iron-loss model — see ems_core.MOTOR_VARIANT).
-    For variant 'v1' this equals I_dc × V_eff exactly. Use variant 'v2'/'v3'
-    to study sensitivity to the iron-loss assumption.
-
-    No regenerative braking is modelled: zeros where P_wheel <= 0
-    (glide, coast, downhill braking)."""
+    Steps (per the team spec):
+      1. Road-load mechanical power at the wheel  P_wheel = rolling+aero+accel+grade.
+      2. Output torque  T = P_wheel/v · R_WHEEL ;  output RPM = v · RPM_PER_MS.
+      3. η = motor_eta_rt(RPM, T)  (folds in gearbox + motor losses).
+      4. P_dem = P_wheel / η      — the MOTOR electrical power only
+         (NOT differential or DC-DC, per spec). I_mot = P_dem/48 V (done in simulate()).
+    Returns P_dem [W], V_eff (=48 V), T [Nm]. `variant` is accepted for
+    back-compat but ignored — this is a single measured map, no iron-loss variants.
+    No regen: zero where P_wheel ≤ 0 (glide/coast/brake)."""
     accel       = np.gradient(va, DT)
     P_wheel     = (CRR*MASS*G*va + 0.5*CD*AF*RHO*va**3
                    + MASS*accel*va + MASS*G*ga*va)
     P_wheel_pos = np.maximum(P_wheel, 0.)
     v_safe      = np.maximum(va, 0.3)
-    Torque_Nm   = (P_wheel_pos / v_safe) * R_WHEEL
-    Speed_kmh   = va * 3.6
-    _, V_eff, _ = motor_lookup_2d(Speed_kmh, Torque_Nm)
-    P_elec      = motor_power_2d(Speed_kmh, Torque_Nm, variant)  # DC bus power [W]
-    return P_elec, V_eff, Torque_Nm
+    Torque_Nm   = (P_wheel_pos / v_safe) * R_WHEEL          # output/wheel torque [Nm]
+    RPM         = va * RPM_PER_MS                            # output/wheel RPM
+    moving      = (P_wheel_pos > 1.0) & (va > 0.3)
+    eta         = motor_eta_rt(RPM, Torque_Nm)
+    eta         = np.where(moving & (eta > 0.05), eta, 1.0)  # guard idle/zero
+    P_dem       = np.where(moving, P_wheel_pos / eta, 0.0)   # motor electrical [W]
+    V_eff       = np.full_like(va, MOTOR_V)
+    return P_dem, V_eff, Torque_Nm
 
 def verify(t,v,la,silent=True):
     d=float(np.trapezoid(v,t))/1000.; dur=float(t[-1])/60.
@@ -428,11 +456,12 @@ def simulate(fn,P_elec_arr,la_arr,coast_arr=None,SOC0=SC_SOC_0):
     for k in range(n):
         s=SOCa[k]; P_elec=float(P_elec_arr[k]); li=int(la_arr[k])-1
         til=float((k-lt0[li+1])*DT)
-        # Derive I_motor and U_sc: actual bus current = P_elec / U_bus (2-step ESR correction)
-        U_oc = float(sc_voltage(s))                          # open-circuit voltage
-        I_m  = P_elec / max(U_oc, v_min)                    # first estimate of bus current
-        U_sc = sc_terminal_voltage(s, I_m)                  # terminal voltage with ESR sag
-        I_m  = P_elec / max(U_sc, v_min)                    # corrected bus current
+        # Strategy inputs (team spec): I_mot = P_dem/48 V; U_mot = U_sc (bus voltage).
+        # U_sc carries the SC ESR sag computed from the actual bus current.
+        U_oc  = float(sc_voltage(s))                         # SC open-circuit voltage
+        I_bus = P_elec / max(U_oc, v_min)                   # bus current (for ESR sag)
+        U_sc  = sc_terminal_voltage(s, I_bus)               # bus voltage under load
+        I_m   = P_elec / MOTOR_V                            # I_mot = P_dem / 48 V
         P_demand = P_elec                                    # actual electrical demand [W]
         Pc=float(fn(I_m,U_sc,pp,til,li))
         Pc=float(np.clip(Pc,pp-FC_RAMP*DT,pp+FC_RAMP*DT))
@@ -595,15 +624,10 @@ if __name__ == '__main__':
     print(f"  V_HIGH={best['VH']} m/s ({best['VH']*3.6:.1f}km/h)  V_LOW={best['VL']} m/s  PP={best['PP']}W  k_grade={best.get('k_grade',0.):.0f}")
     print(f"  K_p={best['Kp']:.1f}  H2(raw)={best['H2']:.3f}g  H2(CS-norm)={best['H2n']:.3f}g  "
           f"km/m³={best['km3']:.1f}  dSOC={best['dSOC']:+.4f}")
-    print(f"  (FC→bus converter η={ETA_DCDC:.2f}, SC round-trip η={SC_ETA:.2f}, motor iron-loss '{MOTOR_VARIANT}')")
-
-    # ── Motor iron-loss sensitivity band (v1 optimistic … v3 pessimistic) ──────
-    print(f"\n=== Motor iron-loss sensitivity (Strategy G on best profile) ===")
-    for var in ('v1', 'v2', 'v3'):
-        P_e_v, _, _ = compute_motor_signals(best['va'], best['ga'], variant=var)
-        _, r_v = bisect_kp(P_e_v, best['la'], best['ca'], f"iron-loss {var}")
-        print(f"  {var}: km/m³={km_per_m3(r_v):6.1f}  H2(norm)={r_v['m_H2_norm']:.3f}g  "
-              f"dSOC={r_v['dSOC']:+.4f}")
+    print(f"  (FC→bus converter η={ETA_DCDC:.2f}, SC round-trip η={SC_ETA:.2f}, "
+          f"motor map = measured RPM×Torque η, I_mot=P_dem/48V)")
+    # Motor map is now a single MEASURED RPM×Torque efficiency table (team xlsx) —
+    # the old v1/v2/v3 iron-loss sensitivity band no longer applies.
 
     # ── EMS rec #3: FC η-band cap comparison on the best profile ───────────────
     print(f"\n=== EMS rec #3: FC η-band cap comparison (Strategy G, best profile) ===")

@@ -42,11 +42,18 @@
 > |---|---|---|---|---|---|---|---|
 > | km/m³ | 148 | 147 | 162 | **165** | 160 | 164 | 159 |
 >
-> **Current headline: Strategy G ≈ 165.3 km/m³** (normalised, converter loss,
-> MASS=180 kg, AF=1.35 m², feasible 35 Nm torque cap, coast-then-brake @ 7 km/h,
-> best VH=10.0 / VL=6.0 / PP=1400 W, ~35.3 min). Journey: 174.6 → 162.8 (torque
-> cap) → 148.4 (glide-to-1km/h) → **165.3 (optimum brake 7 km/h)**. Motor
-> iron-loss still dominates: v1=165.3, v2=138.4, v3=119.0 km/m³.
+> **Measured motor map (latest):** the old optimistic/uncertain BAFANG iron-loss
+> LUT is replaced by the team's **measured RPM×Torque efficiency map** (BAFANG RM
+> G060.1000 6T 90A 48V, 5:1 gearbox), output/wheel-referenced (RPM↔speed, torque
+> from vehicle dynamics). η ≈ 74–83 % at the operating points (vs ~50–58 % before).
+> `P_dem = P_wheel/η_motor` (motor only — excludes differential & DC-DC);
+> `I_mot = P_dem/48 V`; `U_mot = U_sc`.
+>
+> **Current headline: Strategy G ≈ 239 km/m³** (CS-normalised, converter loss,
+> MASS=180 kg, AF=1.35 m², 35 Nm torque cap, brake @ 7 km/h, **measured motor η**;
+> best VH=9.5 / VL=7.0 / PP=1200 W, ~35 min, charge-sustaining). The measured map
+> lifted mileage **~165 → ~239 km/m³** (it was the project's #1 uncertainty). All
+> charge-sustaining strategies cluster 238–240; the controller is a ~±1 % lever.
 
 ---
 
@@ -101,7 +108,7 @@ SIM/
 │   └── strategy_g.py                  ← Strategy G (production: I_motor,U_sc → P_fc) — clean, shareable ★
 │
 ├── data/                              ← input/output velocity profiles
-│   ├── sem_combined_best.csv          ← CURRENT BEST profile (VH=10.0, VL=6.0, PP=1400W)
+│   ├── sem_combined_best.csv          ← CURRENT BEST profile (VH=9.5, VL=7.0, PP=1200W)
 │   ├── sem_2026_elev_aware.csv        ← MATLAB elevation-aware P&G reference
 │   └── canonical_with_incline.csv     ← Real 2023/24 race telemetry (11 laps)
 │
@@ -161,7 +168,7 @@ SIM/
 | `strategy_d_lut4x4.py` | 4×4 lookup table indexed by (SOC band, power band). | Old | Reference |
 | `strategy_e_aecms.py` | Adaptive ECMS — updates equivalence factor online based on SOC drift. | Old | Reference |
 | `strategy_f_lpf.py` | LPF feedforward only (no PI). FC tracks low-pass-filtered motor power. | Old | Reference |
-| `strategy_g.py` | **Production Strategy G** — clean, self-contained controller: inputs `I_motor`, `U_sc` → output `P_fc [W]`. Byte-identical to the harness's `make_strat_g` (165.3 km/m³, charge-sustaining). Shareable / Simulink-translatable. |
+| `strategy_g.py` | **Production Strategy G** — clean, self-contained controller: inputs `I_motor`, `U_sc` → output `P_fc [W]`. Byte-identical to the harness's `make_strat_g` (≈239 km/m³ with the measured motor map, charge-sustaining). Shareable / Simulink-translatable. |
 
 ### data/
 
@@ -175,12 +182,12 @@ SIM/
 
 | File | What it shows |
 |------|---------------|
-| `combined_best_result.png` | **Main result.** 6 panels: velocity profile, SC SOC, FC power, SC power, cumulative H₂, strategy comparison table. Best profile: VH=10.0, VL=6.0, PP=1400 W. |
+| `combined_best_result.png` | **Main result.** 6 panels: velocity profile, SC SOC, FC power, SC power, cumulative H₂, strategy comparison table. Best profile: VH=9.5, VL=7.0, PP=1200 W. |
 | `grid_search_extended.png` | Heatmap of km/m³ over all (VH, VL) combinations at best PP. Valid cells (charge-sustaining) shown green. Red star = previous best; gold star = new best. |
 | `profile_comparison.png` | 3×3 subplot comparing Python P&G, MATLAB elev-aware, and real telemetry profiles side-by-side (velocity, SOC, FC power). |
 | `profile_velocity_comparison.png` | Lap 1 velocity traces + speed distribution histogram: Python P&G is bimodal (aggressive), MATLAB profile is unimodal (near-constant). |
 | `FC_LC52_30_system_curves_v3.png` | FC stack voltage, power, and H₂ rate vs current. Shows peak electrical efficiency at ~120 W. |
-| `strategy_g_slides.html` | Self-contained HTML deck (10 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Reflects the current model: 165.3 km/m³, VH 10.0 / VL 6.0 / PP 1400, brake @ 7 km/h, feasible 35 Nm torque cap. |
+| `strategy_g_slides.html` | Self-contained HTML deck (11 slides, **HTML PPT Studio** `engineering-whiteprint` theme — bright/professional). Interactive Chart.js velocity+elevation plot and an animated signal-flow diagram. Open in any browser; ← → / F / click to navigate. Shows the pre-measured-motor figure (165.3 km/m³); **superseded** — current best is ≈239 km/m³ with the measured motor map (deck regen pending). |
 
 ---
 
@@ -376,13 +383,14 @@ SIM/
 
 | Parameter | Current Best | Description |
 |-----------|-------------|-------------|
-| `VH` | 10.0 m/s (36.0 km/h) | Pulse target speed |
-| `VL` | 6.0 m/s (21.6 km/h) | Glide lower bound |
-| `PP` | 1400 W | Motor pulse power |
+| `VH` | 9.5 m/s (34.2 km/h) | Pulse target speed |
+| `VL` | 7.0 m/s (25.2 km/h) | Glide lower bound |
+| `PP` | 1200 W | Motor pulse power |
 | `V_DH` | 10.5 m/s | Downhill speed cap |
+| `k_grade` | 60 | Terrain-adaptive gain (marginal +1 km/m³ here) |
 | `TAU_MOTOR_MAX` | 35 Nm (→119 N) | Tractive-force cap (motor LUT ceiling) |
 | `V_COAST_STOP` | 7 km/h | Coast, then brake from 7 km/h (swept optimum; 0.63 m brake dist) |
-| Race time | ~35.3 min | Within the 28–35.5 min window |
+| Race time | ~35.0 min | Within the 28–35.5 min window |
 
 ---
 
@@ -408,18 +416,18 @@ This script:
 - Prints a results table and consistency checks
 
 Expected output (CS-normalised km/m³, FC→bus converter loss η=0.95; MASS=180 kg,
-AF=1.35 m², feasible 35 Nm torque cap + coast-then-brake @ 7 km/h; VH=10.0/VL=6.0/PP=1400):
+AF=1.35 m², 35 Nm torque cap + brake @ 7 km/h, **measured motor map**; VH=10.0/VL=6.0/PP=1400):
 ```
   Strategy           km/m³    H2[g]      dSOC   CS?
-  G  LPF+PI+floor    164.2    7.930   -0.0008   YES ★
-  A  2D-LUT          163.3    7.819   -0.0294   NO
-  B  Rule-FSM        163.0    7.929   -0.0120   YES
-  D  Const-FC        162.9    7.986   -0.0023   YES
-  C  Strat-H         162.6    8.031   +0.0025   YES
+  C  Strat-H         235.2    5.558   +0.0032   YES
+  B  Rule-FSM        235.2    5.572   +0.0059   YES
+  D  Const-FC        235.1    5.611   +0.0131   YES
+  G  LPF+PI+floor    235.1    5.499   -0.0085   YES ★
+  A  2D-LUT          233.2    5.988   +0.0754   NO
 ```
-> Note: G wins narrowly (LPF + SOC-PI); A & PI-only look efficient only by
-> draining the SC (ΔSOC ≪ 0). `run_test` uses VH=10.0/PP=1400 → 164.2; the
-> grid-search best is VH=10.0/VL=6.0/PP=1400 → 165.3 km/m³.
+> Note: with the measured motor map all CS strategies cluster ≈235 on this profile
+> (A "wins" only by draining the SC — not CS). `run_test` uses VH=10.0/VL=6.0/PP=1400;
+> the grid-search best is VH=9.5/VL=7.0/PP=1200 → ≈239 km/m³.
 
 ### Run the main simulation
 
@@ -484,18 +492,18 @@ All 6 strategies are implemented in `scripts/combined_best_profile.py` as
 `make_strat_*()` factory functions. Each returns `fn(I_motor, U_sc, P_fc_prev,
 t_in_lap, lap_idx) → P_fc [W]`.
 
-> km/m³ below are **charge-sustaining-normalised** (dSOC=0) and include the
-> FC→bus converter loss (η=0.95). Vehicle (180 kg, AF 1.35 m²), grid point
-> VH=10.0, VL=6.0, PP=1400 W (feasible torque cap + coast-then-brake @ 7 km/h).
+> km/m³ below are **charge-sustaining-normalised** (dSOC=0), include the FC→bus
+> converter loss (η=0.95), and use the **measured RPM×Torque motor efficiency map**.
+> Best profile VH=9.5, VL=7.0, PP=1200 W (k_grade=60). All CS strategies cluster 238–240.
 
 | Strategy | Function | Description | Best km/m³ |
 |----------|----------|-------------|-----------|
-| **G (winner)** | `make_strat_g(K_p, K_i, tau, p_eta_cap)` | LPF feedforward + SOC-PI + lap-offset + always-on FC floor (FC_P_MIN); optional η-band cap (#3, off) | **165.3** |
-| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) table | ~172.9 |
-| Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~172.5 |
-| Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~172.5 |
-| H | `make_strat_h(P_set)` | Large-SC optimal constant dispatch + soft SOC term | ~172.4 |
-| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | ~172.8 (not charge-sustaining) |
+| Constant FC | `make_strat_constant(P_set)` | Single setpoint, no feedback | ~240.0 |
+| H | `make_strat_h(P_set)` | Large-SC optimal constant dispatch + soft SOC term | ~239.4 |
+| Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~239.2 |
+| **G** | `make_strat_g(K_p, K_i, tau, p_eta_cap)` | LPF feedforward + SOC-PI + lap-offset + always-on FC floor; optional η-band cap | **238.9** |
+| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | ~238.5 (not CS) |
+| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) | ~237.6 (not CS) |
 
 ### Strategy G — Why it wins
 
@@ -520,58 +528,56 @@ t_in_lap, lap_idx) → P_fc [W]`.
 
 ## 7. Results Summary
 
-### Final Rankings (VH=9.0, VL=6.5, PP=800 W, 11 laps, 14.5 km; MASS=180, AF=1.35)
+### Final Rankings (VH=9.5, VL=7.0, PP=1200 W, k_grade=60, 11 laps, 14.5 km; MASS=180, AF=1.35)
 
-> **km/m³ are charge-sustaining-normalised (dSOC=0) and include the FC→bus
-> converter loss (η_dcdc=0.95) and the corrected SC round-trip (√0.97/dir).**
-> High-drag vehicle (CdA=0.2025). These supersede the AF=0.8 figures (~205).
+> **CS-normalised km/m³**, with FC→bus converter loss (0.95), SC round-trip
+> (√0.97/dir), 35 Nm torque cap, brake @ 7 km/h, and the **measured RPM×Torque
+> motor efficiency map**. These supersede the old iron-loss-LUT figures (~165).
 
 | Rank | Strategy | km/m³ | H₂ [g] | dSOC | CS? |
 |------|----------|-------|--------|------|-----|
-| 1 | **Strategy G** | **174.6** | 7.46 | +0.013 | ✓ |
-| 2 | Strategy A (2D LUT) | ~172.9 | ~7.45 | −0.016 | ✗ |
-| 3 | Constant FC | ~172.5 | ~7.61 | +0.011 | ✓ |
-| 3 | Rule-Based | ~172.5 | ~7.59 | +0.007 | ✓ |
-| 5 | Strategy H | ~172.4 | ~7.59 | +0.007 | ✓ |
-| — | PI only | ~172.8 | ~6.99 | −0.101 | ✗ |
+| 1 | Constant FC | 240.0 | 5.38 | −0.011 | ✓ |
+| 2 | Strategy H | 239.4 | 5.46 | +0.004 | ✓ |
+| 3 | Rule-Based | 239.2 | 5.52 | +0.013 | ✓ |
+| 4 | **Strategy G** | 238.9 | 5.46 | −0.008 | ✓ |
+| — | PI only | 238.5 | 5.20 | −0.051 | ✗ |
+| — | Strategy A (2D LUT) | 237.6 | 5.91 | +0.080 | ✗ |
 
-CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). Strategy G leads by only ~1.5 km/m³ —
-the high-drag duty cycle keeps average demand inside the FC η-band, so all
-reasonable strategies cluster tightly.
+CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). With the real motor map (η ≈ 74–83 %),
+all charge-sustaining strategies cluster within ~1 km/m³ (238–240). The controller
+is a small lever — the **motor efficiency** is what moved the result (165 → 239).
 
-### Motor iron-loss sensitivity (Strategy G, best profile)
+### Motor efficiency map (measured — replaces the old iron-loss sensitivity)
 
-| Variant | km/m³ | Note |
-|---------|-------|------|
-| v1 (optimistic, default) | **165.3** | lowest iron loss |
-| v2 | ~138.4 | mid |
-| v3 (pessimistic) | ~119.0 | highest iron loss |
-
-> The iron-loss assumption dominates the result far more than any EMS choice
-> (±25 % vs ±1 %) — motor bench-validation remains the top priority.
+The motor is now modelled from the team's **measured RPM×Torque efficiency map**
+(BAFANG RM G060.1000 6T 90A 48V, 5:1 gearbox), output/wheel-referenced, replacing
+the old optimistic/uncertain iron-loss LUT and its v1/v2/v3 sensitivity band.
+η ≈ 74–83 % at the operating points (vs ~50–58 % before). `P_dem = P_wheel / η`
+(motor only — excludes differential & DC-DC); `I_mot = P_dem / 48 V`; `U_mot = U_sc`.
+This resolves the project's single biggest uncertainty and lifted the headline
+from ~165 to ~239 km/m³.
 
 ### EMS rec #3 — FC η-band cap (off by default)
 
 | Config | km/m³ | CS? |
 |--------|-------|-----|
-| cap OFF (default) | **174.6** | ✓ |
-| cap ON (≈385 W) | 175.5 | ✗ |
+| cap OFF (default) | **238.9** | ✓ |
+| cap ON (≈385 W) | 241.6 | ✓ |
 
-> Capping the FC at the η-band edge does **not** help this vehicle: average
-> demand is already in-band, so capping only pushes peak energy through the SC
-> (≈3 % round-trip loss), cancelling the efficiency gain — and it breaks charge
-> sustenance. Left as opt-in (`p_eta_cap`) for genuinely low-demand duty cycles.
+> With the measured motor map the η-band cap gives a small gain (+~2.7 km/m³) and
+> stays charge-sustaining, but it's left **off by default** for robustness (the
+> SOC-PI must do more work). Opt in via `p_eta_cap` if desired.
 
 ### Terrain-adaptive P&G (#2) sweep
 
 | k_grade | km/m³ | dSOC | Note |
 |---------|-------|------|------|
-| 0 (flat) | **174.6** | +0.013 | best |
-| 60 | 170.7 | +0.014 | no gain |
-| 80 | 169.7 | +0.015 | no gain |
+| 0 (flat) | ~237 | −0.007 | baseline |
+| 40 | 236.6 | −0.006 | ~flat |
+| **60** | **238.9** | −0.008 | marginal best (grid pick) |
 
-> The SEM 2025 EU track is too flat (~0.3 % grade) for terrain adaptation to pay
-> off. The mechanism is implemented and ready for hillier circuits.
+> The SEM 2025 EU track is nearly flat (~0.3 % grade), so terrain adaptation gives
+> only a marginal (~1 km/m³) gain. The mechanism is ready for hillier circuits.
 
 ### P&G Grid Search Best (Strategy G, charge-sustaining)
 
@@ -581,10 +587,10 @@ reasonable strategies cluster tightly.
 
 | Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ (normalised) |
 |------|----------|----------|--------|-------|
-| 1 | 10.0 | **6.0** | 1400 | **165.3** |
-| 2 | 9.5 | 6.0 | 1200 | 162.4 |
-| 3 | 9.5 | 7.0 | 1200 | 161.8 |
-| ~ | 10.5 | 6.5 | 1200 | ~155 (faster → more drag); VH 10.0/VL6.0 is the sweet spot |
+| 1 | 9.5 | **7.0** | 1200 | **238.9** |
+| 2 | 9.5 | 6.0 | 1200 | 237.8 |
+| 3 | 10.0 | 6.0 | 1400 | 237.5 |
+| ~ | 9.5–10.0 | 6.0–7.0 | 1200 | ~236–238 (cluster); VH 9.5 / VL 7.0 is the sweet spot |
 
 Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 14.5 km in time including coast-to-stop phases).
@@ -623,7 +629,7 @@ Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 
 Self-contained 11-slide HTML deck (HTML PPT Studio `engineering-whiteprint` theme).
 Navigate with ← → / Space / F (fullscreen) / click; deep-link via `#/N`:
-1. Title + headline stats (165.3 km/m³)
+1. Title + headline stats (deck shows 165.3; current ≈239 km/m³)
 2. The problem & why pulse-and-glide (motor iron-loss insight)
 3. How the velocity profile was selected (P&G FSM + grid search)
 4. Velocity & elevation vs time — interactive Chart.js (lap-1 / full-race toggle)
