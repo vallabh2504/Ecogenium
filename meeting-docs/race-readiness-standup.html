@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Ecogenium — Race-Readiness Standup | Telematics · Strategy · Control</title>
+
+<!-- Webfonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+/* ===================================================================
+   Design system: engineering-whiteprint
+   (bright white blueprint · navy / blue / red — adapted from HTML PPT
+    Studio, matching fcs-strategy/SIM/plots/strategy_g_slides.html)
+   =================================================================== */
+:root{
+  --bg:#ffffff; --bg-soft:#f8fafc; --surface:#ffffff; --surface-2:#f4f7fb;
+  --border:rgba(10,30,70,.18); --border-strong:#0a1e46;
+  --text-1:#0a1e46; --text-2:#3a4a6a; --text-3:#8090a8;
+  --accent:#1e5ac4; --accent-2:#0a1e46; --accent-3:#c42a10;
+  --good:#1a6a3a; --warn:#c47a10; --bad:#c42a10;
+  --teal:#0d8a8a; --purple:#6a3ac4;
+  --grad:linear-gradient(135deg,#0a1e46,#1e5ac4);
+  --font-sans:'Inter','Noto Sans SC',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono','IBM Plex Mono',monospace;
+  --font-display:'Space Grotesk','Inter',sans-serif;
+  --ease:cubic-bezier(.4,0,.2,1);
+  --anim-dur:.7s;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text-1);
+  font-family:var(--font-sans);line-height:1.55;-webkit-font-smoothing:antialiased;
+  letter-spacing:-.01em;overflow:hidden}
+body{
+  background:
+    repeating-linear-gradient(0deg,rgba(10,30,70,.05) 0 1px,transparent 1px 44px),
+    repeating-linear-gradient(90deg,rgba(10,30,70,.05) 0 1px,transparent 1px 44px),
+    #ffffff;
+}
+img,svg{max-width:100%;display:block}
+code,pre,.mono{font-family:var(--font-mono)}
+
+/* ---------- Slide system ---------- */
+.deck{position:relative;width:100vw;height:100vh;overflow:hidden}
+.slide{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
+  padding:74px 84px 64px;opacity:0;pointer-events:none;
+  transition:opacity .45s var(--ease),transform .45s var(--ease);transform:translateX(26px);overflow:hidden}
+.slide.is-active{opacity:1;pointer-events:auto;transform:none;z-index:2}
+.slide.is-prev{transform:translateX(-26px)}
+
+/* ---------- Chrome ---------- */
+.deck-header{position:absolute;top:20px;left:40px;right:40px;display:flex;justify-content:space-between;
+  align-items:center;font-family:var(--font-mono);font-size:11px;color:var(--text-3);letter-spacing:.14em;
+  text-transform:uppercase;z-index:10;pointer-events:none}
+.deck-header .hl{color:var(--accent)}
+.deck-footer{position:absolute;bottom:18px;left:40px;right:40px;display:flex;justify-content:space-between;
+  align-items:center;font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);letter-spacing:.1em;z-index:10;pointer-events:none}
+.progress-bar{position:fixed;left:0;right:0;bottom:0;height:3px;z-index:20;background:rgba(10,30,70,.08)}
+.progress-bar>span{display:block;height:100%;width:0;background:var(--grad);transition:width .35s var(--ease)}
+
+/* ---------- Section navigation bar (the "Bar") ---------- */
+.navbar{position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:30;
+  display:flex;gap:0;border:1px solid var(--border-strong);background:#fff;
+  box-shadow:0 6px 22px rgba(10,30,70,.10)}
+.navbar button{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-2);background:#fff;border:none;border-right:1px solid var(--border);
+  padding:9px 16px;cursor:pointer;transition:all .2s var(--ease);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.navbar button:last-child{border-right:none}
+.navbar button .ix{font-size:10px;color:var(--text-3)}
+.navbar button:hover{background:var(--surface-2);color:var(--text-1)}
+.navbar button.on{background:var(--accent-2);color:#fff}
+.navbar button.on .ix{color:rgba(255,255,255,.6)}
+.navbar button.on.tele{background:var(--accent)}
+.navbar button.on.strat{background:var(--purple)}
+.navbar button.on.fc{background:var(--teal)}
+
+/* ---------- Typography ---------- */
+.kicker{font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--accent);
+  letter-spacing:.2em;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.kicker::before{content:"";width:26px;height:2px;background:var(--accent-3);display:inline-block}
+.kicker.k-strat{color:var(--purple)} .kicker.k-strat::before{background:var(--purple)}
+.kicker.k-fc{color:var(--teal)} .kicker.k-fc::before{background:var(--teal)}
+h1.title{font-family:var(--font-display);font-size:56px;line-height:1.04;font-weight:700;
+  letter-spacing:-.03em;margin:0 0 12px}
+h2.title{font-family:var(--font-display);font-size:36px;line-height:1.08;font-weight:700;
+  letter-spacing:-.025em;margin:0 0 6px}
+h3{font-family:var(--font-display);font-size:18px;font-weight:600;margin:0 0 8px;color:var(--text-1)}
+h4{font-size:14.5px;font-weight:700;margin:0 0 6px;color:var(--accent-2)}
+p,li{font-size:14.5px;line-height:1.5;color:var(--text-2)}
+.lede{font-size:18px;line-height:1.5;color:var(--text-2);font-weight:300;max-width:66ch}
+.dim{color:var(--text-2)} .dim2{color:var(--text-3)} .mut{color:var(--text-3);font-size:13px}
+.t1{color:var(--text-1)} .blue{color:var(--accent)} .navy{color:var(--accent-2)}
+.red{color:var(--accent-3)} .teal{color:var(--teal)} .purple{color:var(--purple)}
+.good{color:var(--good)} .bad{color:var(--bad)}
+b,strong{color:var(--text-1);font-weight:700}
+.slide ul{margin:5px 0;padding-left:18px} .slide li{margin-bottom:4px;font-size:13px;line-height:1.42}
+
+/* ---------- Primitives ---------- */
+.grid{display:grid;gap:18px} .g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:1fr 1fr 1fr}
+.g4{grid-template-columns:repeat(4,1fr)} .row{display:flex;gap:18px;align-items:flex-start}
+.divider-accent{height:3px;width:64px;background:var(--accent-3);margin:14px 0}
+.card{background:var(--surface);border:1px solid var(--border-strong);padding:14px 16px;position:relative}
+.card.soft{background:var(--surface-2);border-color:var(--border)}
+.card.accent{border-top:3px solid var(--accent)}
+.card.ok{border-top:3px solid var(--good)} .card.warnc{border-top:3px solid var(--warn)}
+.card.redc{border-top:3px solid var(--accent-3)} .card.purp{border-top:3px solid var(--purple)}
+.card.tealc{border-top:3px solid var(--teal)}
+.card h4{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11.5px;
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+.card h4 .tag{margin-left:auto;font-size:9.5px;color:var(--text-3);font-weight:600}
+.pill{display:inline-block;font-family:var(--font-mono);font-size:11px;font-weight:600;padding:3px 11px;
+  border:1px solid var(--border-strong);letter-spacing:.06em;color:var(--text-1);background:#fff}
+.pill.b{border-color:var(--accent);color:var(--accent)}
+.pill.r{border-color:var(--accent-3);color:var(--accent-3)}
+.pill.g{border-color:var(--good);color:var(--good)}
+.pill.p{border-color:var(--purple);color:var(--purple)}
+.pill.t{border-color:var(--teal);color:var(--teal)}
+
+/* ---------- Stat tiles ---------- */
+.stats{display:grid;gap:12px}
+.stat{background:var(--surface-2);border:1px solid var(--border-strong);padding:11px 12px;text-align:center}
+.stat .v{font-family:var(--font-display);font-size:23px;font-weight:700;line-height:1;display:block;color:var(--accent-2)}
+.stat .v.blue{color:var(--accent)} .stat .v.red{color:var(--accent-3)} .stat .v.good{color:var(--good)}
+.stat .v.purple{color:var(--purple)} .stat .v.teal{color:var(--teal)}
+.stat .l{font-size:10px;color:var(--text-3);display:block;margin-top:6px;letter-spacing:.05em;text-transform:uppercase}
+
+/* ---------- Note / callout ---------- */
+.note{background:rgba(196,122,16,.09);border:1px solid rgba(196,122,16,.4);border-left:3px solid var(--warn);
+  padding:8px 13px;font-size:12.5px;color:#7a5410;margin-top:9px}
+.note::before{content:"▲ ";font-weight:700}
+.good-note{background:rgba(26,106,58,.08);border:1px solid rgba(26,106,58,.35);border-left:3px solid var(--good);
+  padding:8px 13px;font-size:12.5px;color:var(--good);margin-top:9px}
+
+/* ---------- Discussion notes panel ("write down what was discussed") ---------- */
+.discuss{margin-top:14px;border:1px solid var(--border-strong);background:var(--surface-2);position:relative}
+.discuss .dhead{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--accent-2);color:#fff;
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.discuss.strat .dhead{background:var(--purple)} .discuss.fc .dhead{background:var(--teal)}
+.discuss .dhead .dot{width:8px;height:8px;border-radius:50%;background:var(--accent-3);
+  box-shadow:0 0 0 0 rgba(196,42,16,.6);animation:rec 1.6s infinite}
+@keyframes rec{0%{box-shadow:0 0 0 0 rgba(196,42,16,.5)}70%{box-shadow:0 0 0 7px rgba(196,42,16,0)}100%{box-shadow:0 0 0 0 rgba(196,42,16,0)}}
+.discuss .dhead .saved{margin-left:auto;font-size:10px;opacity:.85;transition:opacity .3s}
+.discuss textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
+  font-family:var(--font-mono);font-size:13px;line-height:1.55;color:var(--text-1);
+  padding:11px 13px;min-height:104px;display:block}
+.discuss textarea::placeholder{color:var(--text-3);font-style:italic}
+.dtools{display:flex;gap:8px;padding:0 12px 10px}
+.dtools button{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid var(--border-strong);background:#fff;color:var(--text-1);padding:5px 11px;cursor:pointer;transition:all .15s}
+.dtools button:hover{background:var(--accent-2);color:#fff}
+.dtools .spacer{flex:1}
+.dtools .hint{font-family:var(--font-mono);font-size:10px;color:var(--text-3);align-self:center}
+
+/* ---------- Entry animations ---------- */
+[data-anim]{opacity:0}
+.slide.is-active [data-anim="fade-up"]{animation:a-up var(--anim-dur) var(--ease) both}
+.slide.is-active [data-anim="rise"]{animation:a-rise .8s var(--ease) both}
+@keyframes a-up{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+@keyframes a-rise{from{opacity:0;transform:translateY(40px) scale(.98);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+.slide.is-active .stagger>*{opacity:0;animation:a-rise .55s var(--ease) both}
+.slide.is-active .stagger>*:nth-child(1){animation-delay:.08s}
+.slide.is-active .stagger>*:nth-child(2){animation-delay:.18s}
+.slide.is-active .stagger>*:nth-child(3){animation-delay:.28s}
+.slide.is-active .stagger>*:nth-child(4){animation-delay:.38s}
+.gradient-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hero-num{font-family:var(--font-display);font-size:88px;font-weight:700;line-height:.9;color:var(--accent);letter-spacing:-.04em}
+
+/* agenda cards */
+.ag{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.agc{border:1px solid var(--border-strong);background:#fff;padding:16px;cursor:pointer;transition:all .2s var(--ease);border-top:3px solid var(--accent)}
+.agc.s2{border-top-color:var(--purple)} .agc.s3{border-top-color:var(--teal)}
+.agc:hover{transform:translateY(-4px);box-shadow:0 10px 26px rgba(10,30,70,.12)}
+.agc .agn{font-family:var(--font-mono);font-size:11px;color:var(--text-3)}
+.agc .agt{font-family:var(--font-display);font-weight:700;font-size:18px;color:var(--text-1);margin:4px 0 6px}
+.agc .agd{font-size:12.5px;color:var(--text-2);line-height:1.42}
+.agc .owner{font-family:var(--font-mono);font-size:10.5px;color:var(--accent);margin-top:8px;text-transform:uppercase;letter-spacing:.05em}
+.agc.s2 .owner{color:var(--purple)} .agc.s3 .owner{color:var(--teal)}
+
+@media print{.navbar,.deck-footer,.progress-bar,.dot{display:none!important}
+  .slide{position:relative!important;opacity:1!important;transform:none!important;page-break-after:always;height:auto;min-height:100vh}}
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+<div class="deck-header">
+  <span>TEAM ECOGENIUM · <span class="hl">HYDRAIX I</span> · SEM 2026 · Silesia Ring</span>
+  <span>RACE-READINESS STANDUP</span>
+</div>
+
+<!-- ░░░ The Bar — section selector ░░░ -->
+<nav class="navbar" id="navbar">
+  <button data-go="0"><span class="ix">00</span> Overview</button>
+  <button class="tele"  data-go="2"><span class="ix">01</span> Telematics</button>
+  <button class="strat" data-go="3"><span class="ix">02</span> Strategy&nbsp;Sim</button>
+  <button class="fc"    data-go="4"><span class="ix">03</span> FC&nbsp;Control</button>
+  <button data-go="5"><span class="ix">04</span> 6/6&nbsp;&amp;&nbsp;Actions</button>
+</nav>
+
+<div class="deck-footer">
+  <span>Meeting date 2026-06-01 · Integrated test day → <b style="color:var(--accent-3)">2026-06-06</b></span>
+  <span class="slide-number" data-current="1" data-total="6"></span>
+</div>
+<div class="progress-bar"><span id="prog"></span></div>
+
+<!-- ════════════ SLIDE 1 — TITLE ════════════ -->
+<section class="slide is-active" style="justify-content:center">
+  <div class="kicker" data-anim="fade-up">Pit-Wall Standup · Telematics + Strategy Simulation + Control</div>
+  <h1 class="title" data-anim="fade-up">Team&nbsp;Ecogenium<br><span class="gradient-text">Race-Readiness Standup</span></h1>
+  <p class="lede" data-anim="fade-up" style="animation-delay:.1s">
+    A working meeting doc for the three subsystems carrying Hydraix&nbsp;I to the line.
+    Each team gives <b>updates</b>, the <b>work left for the race</b>, and its <b>plan for the 6/6 integrated test</b>.
+    Use the bar above to jump to a section — every section has a live notes panel to capture what was discussed.</p>
+  <div class="row" style="margin-top:26px;gap:34px;align-items:flex-end">
+    <div data-anim="rise" style="animation-delay:.2s">
+      <span class="hero-num">3</span>
+      <div class="mut" style="margin-top:4px">subsystems · one car · one race</div>
+    </div>
+    <div class="stats g4" data-anim="fade-up" style="animation-delay:.35s;gap:10px;flex:1">
+      <div class="stat"><span class="v blue">14.5 km</span><span class="l">11 laps · ~35 min</span></div>
+      <div class="stat"><span class="v purple">235.1</span><span class="l">km/m³ target (Strat G)</span></div>
+      <div class="stat"><span class="v teal">1013 W</span><span class="l">FC stack · LC 52.30</span></div>
+      <div class="stat"><span class="v red">5 days</span><span class="l">to integrated test</span></div>
+    </div>
+  </div>
+  <div style="margin-top:26px;display:flex;gap:10px;flex-wrap:wrap" data-anim="fade-up">
+    <span class="pill b">① Telematics</span>
+    <span class="pill p">② Strategy Simulation</span>
+    <span class="pill t">③ Fuel-Cell System Control</span>
+    <span class="pill r">★ Test day 2026-06-06</span>
+  </div>
+</section>
+
+<!-- ════════════ SLIDE 2 — OVERVIEW / HOW THE MEETING RUNS ════════════ -->
+<section class="slide">
+  <div class="kicker">Agenda · How this meeting runs</div>
+  <h2 class="title">Three sections, one structure</h2>
+  <p class="lede" style="margin-bottom:14px">Every section answers the same three questions, then we capture the discussion live.
+    Click any card (or the <b>bar</b> at the top) to jump straight to that team.</p>
+  <div class="ag" data-anim="fade-up">
+    <div class="agc" data-go="2">
+      <div class="agn">SECTION 01</div>
+      <div class="agt blue">Telematics</div>
+      <div class="agd">On-car PCB → Calypso WiFi → pit-wall. GPS + CAN + sensors logged to SD and streamed live to the Qt dashboard.</div>
+      <div class="owner">Owner · On-car data &amp; pit-wall</div>
+    </div>
+    <div class="agc s2" data-go="3">
+      <div class="agn">SECTION 02</div>
+      <div class="agt purple">Strategy Simulation</div>
+      <div class="agd">EMS strategies A–G + pulse-and-glide. Chosen Strategy&nbsp;G (LPF FF + SOC-PI) now moving to Simulink implementation.</div>
+      <div class="owner">Owner · Energy management</div>
+    </div>
+    <div class="agc s3" data-go="4">
+      <div class="agn">SECTION 03</div>
+      <div class="agt teal">Fuel-Cell System Control</div>
+      <div class="agd">LC 52.30 stack + HyCap supercap hybrid. Low-level power tracking, SC management, and safety interlocks.</div>
+      <div class="owner">Owner · FC + supercap control</div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:18px;gap:14px" data-anim="fade-up" style="animation-delay:.2s">
+    <div class="card ok"><h4>✅ Updates</h4><p style="font-size:13px">What moved since last meeting — what is done and merged.</p></div>
+    <div class="card warnc"><h4>🔧 Work left for the race</h4><p style="font-size:13px">The open items that still stand between us and the start line.</p></div>
+    <div class="card redc"><h4>🧪 Plan for 6/6 testing</h4><p style="font-size:13px">Exactly what each team will run on the integrated test day.</p></div>
+  </div>
+  <div class="note">The maroon ● <b>REC</b> dot on each section means its notes box is recording. Everything you type is saved in this browser automatically — use <b>Export all notes</b> on the last slide to pull the full minutes out as a text file.</div>
+</section>
+
+<!-- ════════════ SLIDE 3 — TELEMATICS ════════════ -->
+<section class="slide" data-section="tele">
+  <div class="kicker">Section 01 · Owner: On-car data &amp; pit-wall</div>
+  <h2 class="title blue">Telematics</h2>
+  <div class="grid g3" style="gap:14px;margin-top:4px">
+    <div class="card ok stagger">
+      <h4>✅ Updates <span class="tag">DONE</span></h4>
+      <ul>
+        <li><b>TelematicsBoardV1</b> PCB designed in Altium — schematic, layout, BOM, Gerbers &amp; 3D renders complete.</li>
+        <li><b>Car-side firmware</b> (RP2040 / C++): GPS, Calypso radio &amp; SD-card drivers integrated in <span class="mono">TelematicsComponent.cpp</span>.</li>
+        <li><b>Pit-wall Qt widget</b> decodes live CAN frames via the <span class="mono">.dbc</span> definition.</li>
+        <li><b>Docker stack</b> + Next.js/Supabase cloud pipeline scaffolded for pre-race validation.</li>
+      </ul>
+    </div>
+    <div class="card warnc stagger">
+      <h4>🔧 Work left for race <span class="tag">OPEN</span></h4>
+      <ul>
+        <li>Assemble &amp; bring up the physical V1 board — verify power rails &amp; programming.</li>
+        <li>Finalise the CAN <span class="mono">.dbc</span> map for all live channels (FC power, SC voltage, motor I/U, speed, H₂).</li>
+        <li>End-to-end live link: car → Calypso → pit-wall — measure <b>latency, packet loss &amp; range</b> at the Ring.</li>
+        <li>SD logging robustness over the full 35-min race; GPS-timestamp sync, zero dropped frames.</li>
+        <li>Lay out the pit-wall dashboard around strategy-relevant signals.</li>
+      </ul>
+    </div>
+    <div class="card redc stagger">
+      <h4>🧪 6/6 testing plan <span class="tag">PLAN</span></h4>
+      <ul>
+        <li><b>Bench bring-up:</b> power board, flash RP2040, confirm GPS fix + SD write.</li>
+        <li><b>CAN loopback:</b> inject known frames, confirm Qt widget decodes via <span class="mono">.dbc</span>.</li>
+        <li><b>Calypso link:</b> range &amp; throughput test across track-length distance.</li>
+        <li><b>Full-path dry run:</b> sensors → radio → live pit-wall display; log latency.</li>
+      </ul>
+      <div class="good-note" style="margin-top:8px">Exit criterion: one clean lap of live data on the pit-wall with &lt;1&nbsp;s latency.</div>
+    </div>
+  </div>
+
+  <div class="discuss" data-notes="tele">
+    <div class="dhead"><span class="dot"></span> Discussion &amp; decisions — Telematics <span class="saved">saved ✓</span></div>
+    <textarea placeholder="Type what was discussed: blockers raised, decisions made, who owns what, dates agreed…  (auto-saved in this browser)"></textarea>
+    <div class="dtools">
+      <button data-act="clear">Clear</button>
+      <button data-act="stamp">+ Timestamp</button>
+      <span class="spacer"></span>
+      <span class="hint">⌨ keyboard nav is disabled while typing here</span>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════ SLIDE 4 — STRATEGY SIMULATION ════════════ -->
+<section class="slide" data-section="strat">
+  <div class="kicker k-strat">Section 02 · Owner: Energy management</div>
+  <h2 class="title purple">Strategy Simulation — Strategy Implementation</h2>
+  <div class="grid g3" style="gap:14px;margin-top:4px">
+    <div class="card ok stagger">
+      <h4>✅ Updates <span class="tag">DONE</span></h4>
+      <ul>
+        <li>Full EMS suite <b>A–G</b> simulated over the 11-lap / 14.5 km race with a cross-strategy comparison table.</li>
+        <li><b>Strategy G chosen</b> (LPF feedforward + SOC-PI) — adaptive, charge-sustaining, no pre-tuned profile.</li>
+        <li>Measured <b>RPM×Torque BAFANG motor map</b> folded in — lifted mileage <span class="mono">~165 → ~235 km/m³</span>.</li>
+        <li>Pulse-and-glide profile picked by grid search (V_HI 10, V_LO 6 m/s, P_pulse 1400 W); robustness checked on WLTC + NEDC.</li>
+      </ul>
+    </div>
+    <div class="card warnc stagger">
+      <h4>🔧 Work left for race <span class="tag">OPEN</span></h4>
+      <ul>
+        <li><b>Translate Strategy G to Simulink:</b> LPF→discrete TF, K_p gain, K_i PID + anti-windup, lap-offset triggered subsystem, floor+clip.</li>
+        <li>Model-in-loop validation against the <b>live telematics signals</b> (I_mot, U_mot, U_soc).</li>
+        <li>Re-tune K_p / K_i against the <b>real</b> SC + FC behaviour; confirm charge-neutral on measured SOC.</li>
+        <li>Driver speed targets / pulse-and-glide coaching cues.</li>
+        <li>Fallback rule-based FSM if the adaptive loop misbehaves.</li>
+      </ul>
+    </div>
+    <div class="card redc stagger">
+      <h4>🧪 6/6 testing plan <span class="tag">PLAN</span></h4>
+      <ul>
+        <li>Replay <b>recorded telematics drive data</b> through the Strategy-G sim; confirm km/m³ &amp; ΔSOC.</li>
+        <li>Closed-loop sim with SC + FC models for 11 laps — check FC floor ≥ 100 W, no integrator windup.</li>
+        <li>Sensitivity sweep on K_p around <span class="mono">2075 W/SOC</span>; verify the charge-sustaining band.</li>
+        <li><b>Regression:</b> Simulink port output must match the Python reference.</li>
+      </ul>
+      <div class="good-note" style="margin-top:8px">Exit criterion: Simulink Strategy&nbsp;G matches Python to ±1% on H₂ &amp; ends charge-neutral.</div>
+    </div>
+  </div>
+
+  <div class="discuss strat" data-notes="strat">
+    <div class="dhead"><span class="dot"></span> Discussion &amp; decisions — Strategy Simulation <span class="saved">saved ✓</span></div>
+    <textarea placeholder="Type what was discussed: gains agreed, Simulink port owner, sim-vs-measured gaps, fallback decision…  (auto-saved in this browser)"></textarea>
+    <div class="dtools">
+      <button data-act="clear">Clear</button>
+      <button data-act="stamp">+ Timestamp</button>
+      <span class="spacer"></span>
+      <span class="hint">⌨ keyboard nav is disabled while typing here</span>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════ SLIDE 5 — FUEL-CELL SYSTEM CONTROL ════════════ -->
+<section class="slide" data-section="fc">
+  <div class="kicker k-fc">Section 03 · Owner: FC + supercap control</div>
+  <h2 class="title teal">Fuel-Cell System Control</h2>
+  <div class="grid g3" style="gap:14px;margin-top:4px">
+    <div class="card ok stagger">
+      <h4>✅ Updates <span class="tag">DONE</span></h4>
+      <ul>
+        <li><b>FC polarisation / system model</b> built (<span class="mono">FuelCellEstimate_v3</span>, LC 52.30 system curves).</li>
+        <li><b>Supercap &amp; motor models</b> complete — SC energy 38.4 kJ, start SOC 0.60.</li>
+        <li>FC max power calibrated to <b>1013 W</b> in <span class="mono">ems_core</span>; FC warm <b>floor 100 W</b> defined.</li>
+      </ul>
+    </div>
+    <div class="card warnc stagger">
+      <h4>🔧 Work left for race <span class="tag">OPEN</span></h4>
+      <ul>
+        <li>Low-level FC controller: <b>power-track the strategy setpoint</b>, hold warm floor, limit ramp rate.</li>
+        <li>SC charge/discharge + DC-DC bus control; protect SC voltage limits.</li>
+        <li>FC <b>startup / shutdown / purge</b> sequencing + thermal &amp; H₂ safety interlocks.</li>
+        <li>Wire control to telematics signals &amp; strategy setpoints over <b>CAN</b>.</li>
+      </ul>
+    </div>
+    <div class="card redc stagger">
+      <h4>🧪 6/6 testing plan <span class="tag">PLAN</span></h4>
+      <ul>
+        <li><b>FC stack bench test:</b> polarisation curve vs model; confirm 1013 W cap &amp; 100 W floor.</li>
+        <li><b>SC bank cycle:</b> charge/discharge; verify SOC estimate vs measured voltage.</li>
+        <li><b>Closed loop:</b> strategy setpoint → FC controller → measured power-tracking error.</li>
+        <li><b>Safety:</b> interlock trips (over-temp, H₂, voltage) + startup/purge dry run.</li>
+      </ul>
+      <div class="good-note" style="margin-top:8px">Exit criterion: FC tracks a stepped setpoint within tolerance &amp; every interlock trips on demand.</div>
+    </div>
+  </div>
+
+  <div class="discuss fc" data-notes="fc">
+    <div class="dhead"><span class="dot"></span> Discussion &amp; decisions — FC System Control <span class="saved">saved ✓</span></div>
+    <textarea placeholder="Type what was discussed: controller architecture, ramp limits, interlock thresholds, bench-test slot owner…  (auto-saved in this browser)"></textarea>
+    <div class="dtools">
+      <button data-act="clear">Clear</button>
+      <button data-act="stamp">+ Timestamp</button>
+      <span class="spacer"></span>
+      <span class="hint">⌨ keyboard nav is disabled while typing here</span>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════ SLIDE 6 — 6/6 TEST DAY + ACTIONS ════════════ -->
+<section class="slide">
+  <div class="kicker">Integrated test day · 2026-06-06</div>
+  <h2 class="title">6/6 test plan &amp; cross-team actions</h2>
+  <div class="grid g2" style="gap:24px;margin-top:6px">
+    <div>
+      <h3>The integration point</h3>
+      <p>The three subsystems only become a car when they meet on the bus. 6/6 is where Strategy setpoints, the FC controller, and the live telematics link are exercised <b>together</b>, not in isolation.</p>
+      <div class="grid g3" style="gap:10px;margin:12px 0">
+        <div class="stat"><span class="v blue">CAN</span><span class="l">shared bus + .dbc</span></div>
+        <div class="stat"><span class="v purple">setpoint</span><span class="l">strategy → FC</span></div>
+        <div class="stat"><span class="v teal">telemetry</span><span class="l">FC/SC → pit-wall</span></div>
+      </div>
+      <div class="note">Dependency: Telematics must lock the <span class="mono">.dbc</span> map <b>before</b> 6/6 so Strategy &amp; FC can publish/subscribe on the right IDs.</div>
+      <div class="good-note">Stretch goal for 6/6: one full closed loop — driver pulse-and-glides, FC holds the setpoint, SC stays charge-neutral, pit-wall sees it all live.</div>
+    </div>
+    <div>
+      <h3>Combined 6/6 run sheet</h3>
+      <ul class="stagger">
+        <li><b>AM · Bench:</b> Telematics board bring-up + FC stack polarisation + SC cycle (parallel benches).</li>
+        <li><b>Midday · Integrate:</b> lock <span class="mono">.dbc</span>, CAN loopback, strategy setpoint → FC controller closed-loop.</li>
+        <li><b>PM · Vehicle:</b> Calypso live-link dry run + full-path latency; replay drive data through Strategy&nbsp;G.</li>
+        <li><b>Wrap:</b> safety interlock trips, log review, export minutes.</li>
+      </ul>
+      <div class="discuss" data-notes="actions" style="margin-top:12px">
+        <div class="dhead"><span class="dot"></span> Cross-team actions / owners / dates <span class="saved">saved ✓</span></div>
+        <textarea placeholder="Action — owner — due date. e.g.  Lock .dbc map — Telematics — 06-05 …"></textarea>
+        <div class="dtools">
+          <button data-act="clear">Clear</button>
+          <button data-act="stamp">+ Timestamp</button>
+          <button data-act="export">⬇ Export all notes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /deck -->
+
+<script>
+(function(){
+  const slides=[...document.querySelectorAll('.slide')];
+  const total=slides.length, prog=document.getElementById('prog');
+  const num=document.querySelector('.slide-number');
+  const navBtns=[...document.querySelectorAll('.navbar button')];
+  let i=slides.findIndex(s=>s.classList.contains('is-active')); if(i<0)i=0;
+
+  function syncNav(n){
+    navBtns.forEach(b=>{
+      const g=+b.dataset.go;
+      // light up the section button that owns the current slide
+      const on = g===n || (b.classList.contains('tele')&&n===2)
+                       || (b.classList.contains('strat')&&n===3)
+                       || (b.classList.contains('fc')&&n===4);
+      b.classList.toggle('on',on);
+    });
+  }
+  function show(n){
+    n=Math.max(0,Math.min(total-1,n));
+    slides.forEach((s,k)=>{s.classList.toggle('is-active',k===n);s.classList.toggle('is-prev',k<n);});
+    i=n; prog.style.width=((n)/(total-1)*100)+'%';
+    if(num){num.dataset.current=n+1;num.dataset.total=total;}
+    if(window.location.hash!=='#/'+(n+1))history.replaceState(null,'','#/'+(n+1));
+    syncNav(n);
+    slides[n].querySelectorAll('[data-anim],.stagger').forEach(el=>{el.style.animation='none';el.offsetHeight;el.style.animation='';});
+  }
+  function next(){show(i+1)} function prev(){show(i-1)}
+
+  // an editable field has focus → never steal the keypress for navigation
+  function typing(){const a=document.activeElement;return a&&(a.tagName==='TEXTAREA'||a.tagName==='INPUT'||a.isContentEditable);}
+
+  document.addEventListener('keydown',e=>{
+    if(typing()){ if(e.key==='Escape')document.activeElement.blur(); return; }
+    if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();next();}
+    else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();prev();}
+    else if(e.key==='Home')show(0); else if(e.key==='End')show(total-1);
+    else if(e.key==='f'||e.key==='F'){if(!document.fullscreenElement)document.documentElement.requestFullscreen();else document.exitFullscreen();}
+  });
+
+  // edge-click advances — but ignore controls and editable / notes areas
+  document.querySelector('.deck').addEventListener('click',e=>{
+    if(e.target.closest('button,a,textarea,input,.discuss,.navbar,.agc'))return;
+    if(e.clientX>window.innerWidth*0.66)next();else if(e.clientX<window.innerWidth*0.18)prev();
+  });
+
+  // the "Bar" + agenda cards jump to a section
+  document.querySelectorAll('[data-go]').forEach(el=>el.addEventListener('click',()=>show(+el.dataset.go)));
+
+  const h=parseInt((location.hash.match(/#\/(\d+)/)||[])[1]); if(h)show(h-1); else show(i);
+  window.addEventListener('hashchange',()=>{const m=location.hash.match(/#\/(\d+)/);if(m)show(+m[1]-1);});
+
+  /* ---------- Discussion notes: persist to localStorage ---------- */
+  const KEY='ecogenium-standup-2026-06-01:';
+  const labels={tele:'TELEMATICS',strat:'STRATEGY SIMULATION',fc:'FUEL-CELL SYSTEM CONTROL',actions:'CROSS-TEAM ACTIONS'};
+  document.querySelectorAll('.discuss').forEach(box=>{
+    const id=box.dataset.notes, ta=box.querySelector('textarea'), saved=box.querySelector('.saved');
+    ta.value=localStorage.getItem(KEY+id)||'';
+    let t;
+    function flash(msg){saved.style.opacity='1';saved.textContent=msg;clearTimeout(t);t=setTimeout(()=>saved.style.opacity='.35',1100);}
+    saved.style.opacity='.35';
+    ta.addEventListener('input',()=>{localStorage.setItem(KEY+id,ta.value);flash('saved ✓');});
+    box.querySelectorAll('[data-act]').forEach(btn=>btn.addEventListener('click',()=>{
+      const act=btn.dataset.act;
+      if(act==='clear'){ if(confirm('Clear these notes?')){ta.value='';localStorage.removeItem(KEY+id);flash('cleared');} }
+      else if(act==='stamp'){
+        const ts='['+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+'] ';
+        const p=ta.selectionStart;ta.value=ta.value.slice(0,p)+(ta.value&&ta.value[p-1]!=='\n'?'\n':'')+ts+ta.value.slice(p);
+        ta.focus();ta.selectionStart=ta.selectionEnd=p+ts.length+1;
+        localStorage.setItem(KEY+id,ta.value);flash('saved ✓');
+      }
+      else if(act==='export'){exportAll();}
+    }));
+  });
+  function exportAll(){
+    let md='# Team Ecogenium — Race-Readiness Standup\n';
+    md+='Meeting date: 2026-06-01   ·   Integrated test day: 2026-06-06\n\n';
+    ['tele','strat','fc','actions'].forEach(id=>{
+      const v=localStorage.getItem(KEY+id)||'(no notes)';
+      md+='## '+labels[id]+'\n'+v+'\n\n';
+    });
+    const blob=new Blob([md],{type:'text/markdown'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download='ecogenium-standup-2026-06-01.md';a.click();URL.revokeObjectURL(a.href);
+  }
+})();
+</script>
+</body>
+</html>
