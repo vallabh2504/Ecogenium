@@ -49,6 +49,14 @@
 > `P_dem = P_wheel/η_motor` (motor only — excludes differential & DC-DC);
 > `I_mot = P_dem/48 V`; `U_mot = U_sc`.
 >
+> **Comparison-honesty fix (latest):** `_bisect_param` is now direction-agnostic
+> (brackets the ΔSOC root either way — Strategy A's K_soc is reversed vs G's K_p),
+> reports whether it reached charge-sustaining, and **no longer fails silently**.
+> `km_per_m3` now credits the dSOC=0 normalisation **only** for genuinely CS runs
+> (|ΔSOC|≤0.015) and ranks non-CS runs on **raw** H2. Result: PI-only now converges
+> honestly to 228 (worse, no feedforward) and 2D-LUT A is flagged ✗ (can't balance,
+> 225 raw) — they were previously flattered onto the pack by the normalisation.
+>
 > **Current headline: Strategy G ≈ 239 km/m³** (CS-normalised, converter loss,
 > MASS=180 kg, AF=1.35 m², 35 Nm torque cap, brake @ 7 km/h, **measured motor η**;
 > best VH=9.5 / VL=7.0 / PP=1200 W, ~35 min, charge-sustaining). The measured map
@@ -423,7 +431,7 @@ AF=1.35 m², 35 Nm torque cap + brake @ 7 km/h, **measured motor map**; VH=10.0/
   B  Rule-FSM        235.2    5.572   +0.0059   YES
   D  Const-FC        235.1    5.611   +0.0131   YES
   G  LPF+PI+floor    235.1    5.499   -0.0085   YES ★
-  A  2D-LUT          233.2    5.988   +0.0754   NO
+  A  2D-LUT          218.5    5.964   +0.0612   NO
 ```
 > Note: with the measured motor map all CS strategies cluster ≈235 on this profile
 > (A "wins" only by draining the SC — not CS). `run_test` uses VH=10.0/VL=6.0/PP=1400;
@@ -502,8 +510,8 @@ t_in_lap, lap_idx) → P_fc [W]`.
 | H | `make_strat_h(P_set)` | Large-SC optimal constant dispatch + soft SOC term | ~239.4 |
 | Rule-based | `make_strat_rule(P_hi)` | Two-level: P_hi when SOC low, P_lo when SOC high | ~239.2 |
 | **G** | `make_strat_g(K_p, K_i, tau, p_eta_cap)` | LPF feedforward + SOC-PI + lap-offset + always-on FC floor; optional η-band cap | **238.9** |
-| PI only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | ~238.5 (not CS) |
-| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) | ~237.6 (not CS) |
+| PI-only | `make_strat_pi(K_p)` | Pure proportional-integral, no feedforward | ~228.1 (CS, but worse — no feedforward) |
+| A (2D LUT) | `make_strat_a(K_soc, P_base)` | Bilinear interpolation on (Δpower/E_sc, SOC) | ~224.8 (✗ can't charge-sustain) |
 
 ### Strategy G — Why it wins
 
@@ -540,12 +548,15 @@ t_in_lap, lap_idx) → P_fc [W]`.
 | 2 | Strategy H | 239.4 | 5.46 | +0.004 | ✓ |
 | 3 | Rule-Based | 239.2 | 5.52 | +0.013 | ✓ |
 | 4 | **Strategy G** | 238.9 | 5.46 | −0.008 | ✓ |
-| — | PI only | 238.5 | 5.20 | −0.051 | ✗ |
-| — | Strategy A (2D LUT) | 237.6 | 5.91 | +0.080 | ✗ |
+| 5 | PI-only (no LPF) | 228.1 | 5.72 | +0.001 | ✓ |
+| — | Strategy A (2D LUT) | 224.8 | 5.80 | +0.054 | ✗ (can't balance) |
 
-CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). With the real motor map (η ≈ 74–83 %),
-all charge-sustaining strategies cluster within ~1 km/m³ (238–240). The controller
-is a small lever — the **motor efficiency** is what moved the result (165 → 239).
+CS = Charge-Sustaining (`|dSOC| ≤ 0.015`). The four well-formed CS strategies
+(Const/H/Rule/G) cluster within ~1 km/m³ (239–240) — real physics. But **PI-only is
+genuinely worse (228)** even when charge-sustaining (G's LPF feedforward is worth
+~+5%), and **2D-LUT (A) can't charge-sustain here at all** (ranked on raw H2). The
+earlier apparent tie of PI/A was an artifact of a normalisation that credited their
+SC surplus — now fixed: non-CS runs are ranked on raw H2 and flagged ✗.
 
 ### Motor efficiency map (measured — replaces the old iron-loss sensitivity)
 
@@ -562,11 +573,11 @@ from ~165 to ~239 km/m³.
 | Config | km/m³ | CS? |
 |--------|-------|-----|
 | cap OFF (default) | **238.9** | ✓ |
-| cap ON (≈385 W) | 241.6 | ✓ |
+| cap ON (≈385 W) | 237.7 | ✗ (dSOC +0.019) |
 
-> With the measured motor map the η-band cap gives a small gain (+~2.7 km/m³) and
-> stays charge-sustaining, but it's left **off by default** for robustness (the
-> SOC-PI must do more work). Opt in via `p_eta_cap` if desired.
+> With the honest CS accounting the η-band cap does not help here (it ends slightly
+> over-charged, so on raw H2 it's marginally worse) — left **off by default**.
+> Opt in via `p_eta_cap` for genuinely low-demand duty cycles.
 
 ### Terrain-adaptive P&G (#2) sweep
 

@@ -501,23 +501,43 @@ def _normalize_h2(m_H2, dSOC, E_fc_J):
     return m_H2 - (dE_fc_J / E_fc_J) * m_H2
 
 def km_per_m3(result, total_km=TOTAL_KM, h2_density=H2_DENSITY):
-    """km/m³ from the charge-sustaining-normalised H2 (preferred for ranking)."""
-    return total_km / (result['m_H2_norm'] / h2_density)
+    """km/m³ for ranking. Uses the charge-sustaining-normalised H2 ONLY when the
+    run is genuinely charge-sustaining (|ΔSOC|≤0.015) — where the dSOC=0 credit is
+    accurate. For non-CS runs it uses RAW H2 (no credit), so a strategy that ends
+    with surplus SC charge is not flattered by the average-intensity normalisation."""
+    cs = abs(result.get('dSOC', 0.0)) <= 0.015
+    m  = result['m_H2_norm'] if cs else result['m_H2']
+    return total_km / (m / h2_density)
 
-def _bisect_param(make_fn,lo,hi,P_e,la,ca,param_name='param'):
-    best=None
-    p=(lo+hi)/2.
-    for it in range(25):
-        fn=make_fn(p); r=simulate(fn,P_e,la,ca)
-        ds=r['dSOC']
-        print(f"    iter{it+1:2d}  {param_name}={p:7.1f}  dSOC={ds:+.4f}  H2={r['m_H2']:.3f}g")
-        if abs(ds)<=0.015: best=r; break
-        if ds<-0.015: lo=p
-        else: hi=p
-        if hi-lo<0.5: break
-        p=(lo+hi)/2.; best=r
-    if best is None: best=r
-    return p,best
+def _bisect_param(make_fn,lo,hi,P_e,la,ca,param_name='param',tol=0.015):
+    """Find `param` giving charge-sustaining |ΔSOC|≤tol. Direction-AGNOSTIC: it
+    brackets the ΔSOC root between lo/hi regardless of whether ΔSOC increases or
+    decreases with the parameter (Strategy A's K_soc is reversed vs G's K_p).
+    Tracks the smallest-|ΔSOC| run, tags it result['cs']=True/False, and warns
+    if it could not be driven to charge-sustaining (no silent boundary failure)."""
+    def ev(p):
+        r=simulate(make_fn(p),P_e,la,ca); return float(r['dSOC']), r
+    ds_lo,r_lo=ev(lo); ds_hi,r_hi=ev(hi)
+    best=min([(abs(ds_lo),lo,r_lo),(abs(ds_hi),hi,r_hi)], key=lambda x:x[0])
+    print(f"    {param_name}: lo={lo:.1f}(dSOC={ds_lo:+.4f})  hi={hi:.1f}(dSOC={ds_hi:+.4f})")
+    if ds_lo*ds_hi <= 0:                       # root is bracketed → bisect to zero
+        for it in range(28):
+            mid=(lo+hi)/2.; ds_m,r_m=ev(mid)
+            if abs(ds_m)<best[0]: best=(abs(ds_m),mid,r_m)
+            print(f"    iter{it+1:2d}  {param_name}={mid:8.1f}  dSOC={ds_m:+.4f}  H2={r_m['m_H2']:.3f}g")
+            if abs(ds_m)<=tol: break
+            if (ds_lo<0)==(ds_m<0): lo=mid; ds_lo=ds_m   # same sign as lo end → move lo
+            else:                   hi=mid; ds_hi=ds_m
+            if hi-lo<1e-3: break
+    else:
+        print(f"    [warn] ΔSOC same sign at both ends — root NOT bracketed; "
+              f"widen the {param_name} range. Reporting closest point (NOT charge-sustaining).")
+    p_b,r_b=best[1],best[2]
+    r_b['cs']=bool(abs(r_b['dSOC'])<=tol)
+    if not r_b['cs']:
+        print(f"    [warn] {param_name}={p_b:.1f} did NOT reach charge-sustaining "
+              f"(dSOC={r_b['dSOC']:+.4f}); flagged CS=✗, ranked on RAW H2.")
+    return p_b, r_b
 
 def bisect_kp(P_e,la,ca,label=''):
     print(f"\n  Strategy G bisect K_p — '{label}'")
@@ -529,7 +549,7 @@ def bisect_const(P_e,la,ca):
 
 def bisect_pi(P_e,la,ca):
     print(f"\n  PI-only bisect K_p")
-    return _bisect_param(lambda kp: make_strat_pi(kp), 100.,3000.,P_e,la,ca,'K_p')
+    return _bisect_param(lambda kp: make_strat_pi(kp), 100.,18000.,P_e,la,ca,'K_p')
 
 def bisect_rule(P_e,la,ca):
     print(f"\n  Rule-based bisect P_hi")
@@ -552,7 +572,9 @@ def bisect_a(P_e,la,ca):
     P_base     = float(np.clip((E_motor - FC_P_MIN * T_floor) / max(T_motor_on, 1.),
                                FC_P_MIN, FC_P_MAX))
     print(f"    P_base={P_base:.1f}W  (motor-on {T_motor_on:.0f}s, glide-floor {T_floor:.0f}s × {FC_P_MIN:.0f}W)")
-    return _bisect_param(lambda ks: make_strat_a(ks, P_base), 50.,600.,P_e,la,ca,'K_soc')
+    # K_soc monotonicity is REVERSED vs G (stronger feedback lowers the over-charging
+    # FC), so the root is bracketed across a wide range and _bisect_param auto-detects direction.
+    return _bisect_param(lambda ks: make_strat_a(ks, P_base), 0.,3000.,P_e,la,ca,'K_soc')
 
 # ── Grid search — target ≤ 35 min ─────────────────────────────────────────────
 if __name__ == '__main__':
