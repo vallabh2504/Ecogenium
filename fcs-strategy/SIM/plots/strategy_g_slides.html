@@ -159,6 +159,37 @@ tr.bad-row td{color:var(--text-3);font-style:italic}
 @keyframes nodein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 #flow .dot{fill:#fff;stroke-width:1.4}
 
+/* ---------- Mini flowcharts (strategy-field slides) ---------- */
+.mflow{width:100%;height:auto;background:var(--surface);border:1px solid var(--border-strong)}
+.mflow rect{fill:#fff;stroke-width:1.6}
+.mflow .soft{fill:var(--surface-2)}
+.mflow text{font-family:var(--font-mono);fill:var(--text-1)}
+.mflow .mut{fill:var(--text-3)}
+.mflow .wire{fill:none;stroke:var(--text-2);stroke-width:1.6;stroke-dasharray:6 4}
+.slide.is-active .mflow .wire{animation:dashflow 1s linear infinite}
+.flow-cap{font-family:var(--font-mono);font-size:11px;color:var(--text-3);margin-top:6px;text-align:center}
+.flow-title{font-family:var(--font-display);font-weight:600;font-size:14px;color:var(--text-1);margin:0 0 4px;display:flex;align-items:center;gap:8px}
+.flow-title .km{font-family:var(--font-mono);font-size:12px;color:var(--accent)}
+
+/* strategy-field card grid */
+.sfield{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+.sfcard{background:var(--surface);border:1px solid var(--border-strong);border-top:3px solid var(--accent);padding:11px 13px}
+.sfcard.t-open{border-top-color:var(--text-3)}.sfcard.t-rule{border-top-color:var(--warn)}
+.sfcard.t-ff{border-top-color:var(--accent)}.sfcard.t-fb{border-top-color:var(--good)}
+.sfcard.t-map{border-top-color:var(--purple)}.sfcard.t-opt{border-top-color:var(--teal)}
+.sfcard .sfh{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.sfcard .sfn{font-family:var(--font-display);font-weight:700;font-size:14.5px;color:var(--text-1)}
+.sfcard .sfkm{font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent);white-space:nowrap}
+.sfcard .sfkm.x{color:var(--bad)}
+.sfcard .sftag{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin:3px 0 6px}
+.sfcard .sfd{font-size:11.5px;color:var(--text-2);line-height:1.42}
+/* control-spectrum bar */
+.spectrum{display:flex;border:1px solid var(--border-strong);overflow:hidden;font-family:var(--font-mono);font-size:11px}
+.spectrum div{flex:1;padding:9px 8px;text-align:center;color:#fff;font-weight:600;letter-spacing:.04em}
+.spectrum .s1{background:var(--text-3)}.spectrum .s2{background:var(--warn)}
+.spectrum .s3{background:var(--good)}.spectrum .s4{background:var(--teal)}
+.spectrum .s5{background:var(--accent-3)}
+
 /* ---------- Entry animations ---------- */
 [data-anim]{opacity:0}
 .slide.is-active [data-anim="fade-up"]{animation:a-up var(--anim-dur) var(--ease) both}
@@ -195,6 +226,12 @@ tr.bad-row td{color:var(--text-3);font-style:italic}
 </head>
 <body>
 
+<!-- shared arrowhead marker for the mini flowcharts -->
+<svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0.5 1 L9 5 L0.5 9" fill="none" stroke="var(--text-2)" stroke-width="1.7"/></marker>
+</defs></svg>
+
 <div class="deck">
 
 <div class="deck-header">
@@ -203,7 +240,7 @@ tr.bad-row td{color:var(--text-3);font-style:italic}
 </div>
 <div class="deck-footer">
   <span>balticFuelCells LC 52.30 · HyCap 20P×16S · BAFANG RM G060.1000</span>
-  <span class="slide-number" data-current="1" data-total="11"></span>
+  <span class="slide-number" data-current="1" data-total="16"></span>
 </div>
 <div class="progress-bar"><span id="prog"></span></div>
 
@@ -537,6 +574,244 @@ V_min = 40.0 V   V_max = 60.8 V   SOC₀ = 0.60</div>
     </div>
   </div>
   <div class="notes">On the same velocity profile, all the legitimate strategies land within about two km per cubic metre of each other. Strategy G is one of four that tie at about 235; we choose it for adaptivity. Watch the two that look better — PI-only and the lookup table — they're cheating: their SOC ends far below where it started, so they're really just spending stored energy. Two reality checks on the right. First, the profile choice swings results far more than the controller: the four well-formed charge-sustaining strategies tie at about 235, so we choose G for its adaptivity, not a headline number. And the right panel: the measured motor map replaced the old optimistic estimate and lifted everything to about 235 — that uncertainty is now resolved.</div>
+</section>
+
+<!-- ════════════ SLIDE 9 — THE FIELD: OVERVIEW ════════════ -->
+<section class="slide">
+  <div class="kicker">The Field · The Other Controllers — 1/5</div>
+  <h2 class="title">Six controllers, one bus</h2>
+  <p class="mut" style="margin-top:-2px">Every strategy reads the SAME signals (I_mot · U_mot · U_soc) and outputs P_fc. They differ only in HOW they decide.</p>
+  <div class="sfield" data-anim="fade-up" style="margin-top:12px">
+    <div class="sfcard t-open">
+      <div class="sfh"><span class="sfn">Constant-FC</span><span class="sfkm">235.1 ✓</span></div>
+      <div class="sftag">Open-loop · baseline</div>
+      <div class="sfd">One fixed FC power, bisected offline. The 91 Wh supercap passively buffers every pulse &amp; glide.</div>
+    </div>
+    <div class="sfcard t-rule">
+      <div class="sfh"><span class="sfn">Rule-based</span><span class="sfkm">235.2 ✓</span></div>
+      <div class="sftag">Hysteresis · bang-bang</div>
+      <div class="sfd">A thermostat on SOC: charge hard when the cap drops below the band, idle to the floor when it fills.</div>
+    </div>
+    <div class="sfcard t-ff">
+      <div class="sfh"><span class="sfn">Strategy H</span><span class="sfkm">235.2 ✓</span></div>
+      <div class="sftag">Fixed dispatch + soft trim</div>
+      <div class="sfd">Large-SC optimal: a fixed setpoint plus a gentle ±SOC nudge for disturbance rejection only.</div>
+    </div>
+    <div class="sfcard t-fb">
+      <div class="sfh"><span class="sfn">PI-only</span><span class="sfkm">222.2 ✓</span></div>
+      <div class="sftag">Pure feedback</div>
+      <div class="sfd">SOC proportional + integral, but <b>no feedforward</b> — chases every transient, so ≈6 % worse.</div>
+    </div>
+    <div class="sfcard t-map">
+      <div class="sfh"><span class="sfn">Strategy A</span><span class="sfkm x">218.5 ✗</span></div>
+      <div class="sftag">2D lookup table</div>
+      <div class="sfd">Bilinear map of (demand-rate, SOC)→P_fc, baked offline. Drifts off charge-neutral on this car.</div>
+    </div>
+    <div class="sfcard t-opt">
+      <div class="sfh"><span class="sfn">ECMS family</span><span class="sfkm" style="color:var(--teal)">research</span></div>
+      <div class="sftag">Optimization · D-ECMS / CC</div>
+      <div class="sfd">Hamiltonian minimisation with a co-state + durability weighting. Powerful, but needs a known cycle.</div>
+    </div>
+  </div>
+  <div class="good-note" style="margin-top:12px">Why they cluster at ~235: charge-sustaining + a 91 Wh SC <b>pins the total FC energy</b>, and the FC's η-curve is broad &amp; flat — so the controller is only a ±1 % lever. The lasting differentiator is <b>adaptivity</b>, not the headline number.</div>
+  <div class="notes">Strategy G isn't the only controller we built — it earned its place against five others, and this is the field. Read them left to right as a spectrum of sophistication. Constant fuel cell is the simplest: one fixed power, open-loop, and the big supercap soaks up everything else. Rule-based is a thermostat — charge when the cap is low, idle when it's full. Strategy H is the large-supercap optimal: a fixed setpoint with only a tiny SOC trim. PI-only is pure feedback with no feedforward, and it pays about six percent for that. Strategy A is a two-dimensional lookup table, baked offline, and on our car it can't hold charge. And the ECMS family is the textbook optimal approach — powerful, but it assumes you know the drive cycle. The key insight in the green box: because the strategy is charge-sustaining and the supercap pins the total fuel-cell energy, and the cell's efficiency curve is flat, the controller is only a one-percent lever. So what actually separates them is adaptivity.</div>
+</section>
+
+<!-- ════════════ SLIDE 10 — FLOWCHARTS: CONSTANT-FC & RULE ════════════ -->
+<section class="slide">
+  <div class="kicker">The Field · The Other Controllers — 2/5</div>
+  <h2 class="title">The baselines — open-loop &amp; thermostat</h2>
+  <div class="grid g2" style="gap:24px;margin-top:8px">
+    <div data-anim="fade-up">
+      <div class="flow-title">Constant-FC <span class="km">· 235.1 km/m³ · ✓ CS</span></div>
+      <svg class="mflow" viewBox="0 0 470 165" xmlns="http://www.w3.org/2000/svg">
+        <g><rect x="8" y="20" width="108" height="46" rx="2" stroke="var(--accent-2)"/>
+          <text x="62" y="40" text-anchor="middle" font-size="10.5">motor on?</text>
+          <text x="62" y="54" text-anchor="middle" font-size="10">I_mot ≥ 0.1 A</text></g>
+        <g><rect x="170" y="22" width="150" height="42" rx="2" stroke="var(--accent-3)"/>
+          <text x="245" y="40" text-anchor="middle" font-size="11" font-weight="700">P_fc = P*</text>
+          <text x="245" y="55" text-anchor="middle" font-size="10">fixed 410 W</text></g>
+        <g><rect x="368" y="22" width="94" height="42" rx="2" class="soft" stroke="var(--accent-3)"/>
+          <text x="415" y="40" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent-3)">P_fc [W]</text>
+          <text x="415" y="55" text-anchor="middle" font-size="9" fill="var(--accent-3)">→ FC</text></g>
+        <g><rect x="170" y="110" width="150" height="36" rx="2" stroke="var(--text-3)"/>
+          <text x="245" y="132" text-anchor="middle" font-size="10" class="mut">else → 0 W (idle)</text></g>
+        <path class="wire" d="M116 43 H170" marker-end="url(#arr)"/>
+        <path class="wire" d="M320 43 H368" marker-end="url(#arr)"/>
+        <path class="wire" d="M62 66 V128 H170" marker-end="url(#arr)"/>
+      </svg>
+      <div class="flow-cap">Open-loop · P* bisected offline · the SC absorbs all transients</div>
+    </div>
+    <div data-anim="fade-up" style="animation-delay:.15s">
+      <div class="flow-title">Rule-based (hysteresis) <span class="km">· 235.2 km/m³ · ✓ CS</span></div>
+      <svg class="mflow" viewBox="0 0 470 165" xmlns="http://www.w3.org/2000/svg">
+        <g><rect x="8" y="58" width="116" height="42" rx="2" stroke="var(--good)"/>
+          <text x="66" y="75" text-anchor="middle" font-size="10.5">U_soc → SOC</text>
+          <text x="66" y="90" text-anchor="middle" font-size="9" class="mut">(U²−Vmin²)/…</text></g>
+        <g><rect x="160" y="40" width="150" height="78" rx="2" stroke="var(--accent-2)"/>
+          <text x="235" y="62" text-anchor="middle" font-size="10.5" font-weight="700">hysteresis band</text>
+          <text x="235" y="80" text-anchor="middle" font-size="10">SOC₀ ± 0.05</text>
+          <text x="235" y="100" text-anchor="middle" font-size="9" class="mut">latched state</text></g>
+        <g><rect x="358" y="22" width="104" height="40" rx="2" stroke="var(--accent-3)"/>
+          <text x="410" y="40" text-anchor="middle" font-size="10">SOC&lt;band:</text>
+          <text x="410" y="54" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent-3)">P_fc = P_hi</text></g>
+        <g><rect x="358" y="98" width="104" height="40" rx="2" stroke="var(--text-3)"/>
+          <text x="410" y="116" text-anchor="middle" font-size="10" class="mut">SOC&gt;band:</text>
+          <text x="410" y="130" text-anchor="middle" font-size="10.5" class="mut">P_fc = 100 W</text></g>
+        <path class="wire" d="M124 79 H160" marker-end="url(#arr)"/>
+        <path class="wire" d="M310 60 H358 V42" marker-end="url(#arr)"/>
+        <path class="wire" d="M310 96 H358 V118" marker-end="url(#arr)"/>
+      </svg>
+      <div class="flow-cap">Bang-bang — charge hard below the band, idle to floor above it</div>
+    </div>
+  </div>
+  <div class="notes">Here are the two simplest controllers as flowcharts. On the left, Constant fuel cell: the only decision is whether the motor is on; if it is, output a single fixed power that we found offline by bisection so the charge balances over the race; if the motor's off, output zero. That's the whole controller. On the right, the rule-based thermostat: turn supercap voltage into a state of charge, then compare against a band around the reference. Below the band, latch into charge mode and push the high power; above the band, drop to the floor. It's bang-bang control with a hysteresis band so it doesn't chatter. Both are charge-sustaining and both land at about 235 — because, again, the supercap pins the energy budget.</div>
+</section>
+
+<!-- ════════════ SLIDE 11 — FLOWCHARTS: H & PI-ONLY ════════════ -->
+<section class="slide">
+  <div class="kicker">The Field · The Other Controllers — 3/5</div>
+  <h2 class="title">Fixed dispatch vs pure feedback</h2>
+  <div class="grid g2" style="gap:24px;margin-top:8px">
+    <div data-anim="fade-up">
+      <div class="flow-title">Strategy H — large-SC fixed dispatch <span class="km">· 235.2 · ✓</span></div>
+      <svg class="mflow" viewBox="0 0 470 175" xmlns="http://www.w3.org/2000/svg">
+        <g><rect x="8" y="22" width="160" height="42" rx="2" stroke="var(--accent-2)"/>
+          <text x="88" y="40" text-anchor="middle" font-size="10.5" font-weight="700">P* fixed setpoint</text>
+          <text x="88" y="55" text-anchor="middle" font-size="9" class="mut">(bisected)</text></g>
+        <g><rect x="8" y="104" width="200" height="44" rx="2" stroke="var(--good)"/>
+          <text x="108" y="122" text-anchor="middle" font-size="10">+ K_soft·(SOC₀−SOC)</text>
+          <text x="108" y="138" text-anchor="middle" font-size="9" class="mut">gentle ±SOC trim only</text></g>
+        <g><circle cx="288" cy="78" r="22" fill="#fff" stroke="var(--accent-2)" stroke-width="1.8"/>
+          <text x="288" y="84" text-anchor="middle" font-size="17" fill="var(--accent-2)">Σ</text></g>
+        <g><rect x="338" y="58" width="50" height="40" rx="2" stroke="var(--accent-3)"/>
+          <text x="363" y="82" text-anchor="middle" font-size="10">clip</text></g>
+        <g><rect x="404" y="58" width="58" height="40" rx="2" class="soft" stroke="var(--accent-3)"/>
+          <text x="433" y="82" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--accent-3)">P_fc</text></g>
+        <path class="wire" d="M168 43 H266 V60" marker-end="url(#arr)"/>
+        <path class="wire" d="M208 126 H288 V100" marker-end="url(#arr)"/>
+        <path class="wire" d="M310 78 H338" marker-end="url(#arr)"/>
+        <path class="wire" d="M388 78 H404" marker-end="url(#arr)"/>
+      </svg>
+      <div class="flow-cap">Feedforward-dominant: the big SC makes SOC barely move per lap</div>
+    </div>
+    <div data-anim="fade-up" style="animation-delay:.15s">
+      <div class="flow-title">PI-only — no feedforward <span class="km">· 222.2 · ✓ (worse)</span></div>
+      <svg class="mflow" viewBox="0 0 470 175" xmlns="http://www.w3.org/2000/svg">
+        <g><rect x="6" y="66" width="92" height="42" rx="2" stroke="var(--good)"/>
+          <text x="52" y="91" text-anchor="middle" font-size="10">U_soc→SOC</text></g>
+        <g><rect x="116" y="66" width="116" height="42" rx="2" stroke="var(--good)"/>
+          <text x="174" y="91" text-anchor="middle" font-size="10">err = SOC₀−SOC</text></g>
+        <g><rect x="250" y="20" width="92" height="38" rx="2" stroke="var(--good)"/>
+          <text x="296" y="43" text-anchor="middle" font-size="11" font-weight="700">K_p · err</text></g>
+        <g><rect x="250" y="116" width="116" height="38" rx="2" stroke="var(--teal)"/>
+          <text x="308" y="135" text-anchor="middle" font-size="10">K_i·∫err</text>
+          <text x="308" y="148" text-anchor="middle" font-size="9" class="mut">(clamp)</text></g>
+        <g><rect x="250" y="68" width="92" height="38" rx="2" stroke="var(--text-3)" stroke-dasharray="4 3"/>
+          <text x="296" y="91" text-anchor="middle" font-size="9.5" class="mut">no LPF FF</text></g>
+        <g><circle cx="394" cy="87" r="20" fill="#fff" stroke="var(--accent-2)" stroke-width="1.8"/>
+          <text x="394" y="93" text-anchor="middle" font-size="16" fill="var(--accent-2)">Σ</text></g>
+        <g><rect x="432" y="67" width="34" height="40" rx="2" class="soft" stroke="var(--accent-3)"/>
+          <text x="449" y="91" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--accent-3)">P_fc</text></g>
+        <path class="wire" d="M98 87 H116" marker-end="url(#arr)"/>
+        <path class="wire" d="M232 80 V39 H250" marker-end="url(#arr)"/>
+        <path class="wire" d="M232 94 V135 H250" marker-end="url(#arr)"/>
+        <path class="wire" d="M342 39 H374 V70" marker-end="url(#arr)"/>
+        <path class="wire" d="M366 135 H374 V104" marker-end="url(#arr)"/>
+        <path class="wire" d="M414 87 H432" marker-end="url(#arr)"/>
+      </svg>
+      <div class="flow-cap">Same SOC-PI as G but the LPF feedforward is missing → it lags demand</div>
+    </div>
+  </div>
+  <div class="notes">These two bracket Strategy G. On the left, Strategy H: a fixed setpoint plus a very gentle SOC trim, summed and clipped. The insight behind H is that our supercap is so large the state of charge barely moves within a lap, so feedback hardly matters — a good fixed setpoint is almost optimal. On the right, PI-only: it has exactly the same proportional and integral SOC feedback that lives inside Strategy G, but notice the greyed box — there's no low-pass feedforward. Without that anchor, the controller is always reacting after the fact, lagging the demand, and it pays about six percent. Put H and PI side by side and you can see what G does: it keeps H's feedforward anchor AND PI's feedback trim, getting the best of both.</div>
+</section>
+
+<!-- ════════════ SLIDE 12 — FLOWCHART: STRATEGY A (2D LUT) ════════════ -->
+<section class="slide">
+  <div class="kicker">The Field · The Other Controllers — 4/5</div>
+  <h2 class="title">The map-based controller — Strategy A</h2>
+  <svg class="mflow" viewBox="0 0 920 232" xmlns="http://www.w3.org/2000/svg" style="margin-top:4px">
+    <!-- inputs -->
+    <g><rect x="10" y="20" width="150" height="40" rx="2" stroke="var(--accent)"/>
+      <text x="85" y="44" text-anchor="middle" font-size="11">I_mot · U_mot</text></g>
+    <g><rect x="10" y="96" width="150" height="40" rx="2" stroke="var(--accent)"/>
+      <text x="85" y="120" text-anchor="middle" font-size="11">P_fc_prev</text></g>
+    <g><rect x="10" y="172" width="150" height="40" rx="2" stroke="var(--accent)"/>
+      <text x="85" y="196" text-anchor="middle" font-size="11">U_soc</text></g>
+    <!-- compute -->
+    <g><rect x="210" y="20" width="170" height="40" rx="2" stroke="var(--warn)"/>
+      <text x="295" y="44" text-anchor="middle" font-size="11">P_motor = I·U</text></g>
+    <g><rect x="210" y="96" width="230" height="40" rx="2" stroke="var(--warn)"/>
+      <text x="325" y="121" text-anchor="middle" font-size="11">u = (P_motor − P_fc_prev) / E_sc</text></g>
+    <g><rect x="210" y="172" width="170" height="40" rx="2" stroke="var(--good)"/>
+      <text x="295" y="196" text-anchor="middle" font-size="11">SOC = f(U_soc)</text></g>
+    <!-- table -->
+    <g><rect x="500" y="62" width="220" height="108" rx="2" class="soft" stroke="var(--purple)"/>
+      <text x="610" y="92" text-anchor="middle" font-size="13" font-weight="700" fill="var(--purple)">2D LOOKUP TABLE</text>
+      <text x="610" y="114" text-anchor="middle" font-size="11">21 × 18 grid · bilinear</text>
+      <text x="610" y="134" text-anchor="middle" font-size="11">(u, SOC) → P_fc</text>
+      <text x="610" y="156" text-anchor="middle" font-size="10" class="mut">baked OFFLINE</text></g>
+    <!-- output -->
+    <g><rect x="770" y="90" width="140" height="52" rx="2" stroke="var(--accent-3)"/>
+      <text x="840" y="112" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent-3)">P_fc [W]</text>
+      <text x="840" y="130" text-anchor="middle" font-size="10" fill="var(--accent-3)">→ FC system</text></g>
+    <!-- wires -->
+    <path class="wire" d="M160 40 H210" marker-end="url(#arr)"/>
+    <path class="wire" d="M160 116 H210" marker-end="url(#arr)"/>
+    <path class="wire" d="M160 192 H210" marker-end="url(#arr)"/>
+    <path class="wire" d="M380 40 H470 V100 H500" marker-end="url(#arr)"/>
+    <path class="wire" d="M440 116 H500" marker-end="url(#arr)"/>
+    <path class="wire" d="M380 192 H470 V132 H500" marker-end="url(#arr)"/>
+    <path class="wire" d="M720 116 H770" marker-end="url(#arr)"/>
+  </svg>
+  <div class="grid g2" style="gap:20px;margin-top:14px">
+    <div data-anim="fade-up">
+      <h4>How it decides</h4>
+      <p style="font-size:13px;margin:2px 0 0">Three live signals form two coordinates — a normalised <b>demand-rate</b> <span class="mono">u</span> and the <b>SOC</b> — and the controller reads <span class="mono">P_fc</span> straight off a pre-computed surface. It's the discretised cousin of an ECMS/optimisation policy.</p>
+    </div>
+    <div data-anim="fade-up" style="animation-delay:.15s">
+      <div class="card redc">
+        <h4>Why A fails here</h4>
+        <p style="font-size:12.5px;margin:2px 0 0">The surface is fixed offline, so it can't retune to this car's actual losses. On the SEM profile it ends <b>ΔSOC = +0.061</b> — it quietly banks charge instead of balancing it, so its 218.5 km/m³ isn't a real charge-sustaining result (✗).</p>
+      </div>
+    </div>
+  </div>
+  <div class="notes">Strategy A is the most sophisticated-looking of the field and the one that fails. The idea: take the three live signals, build two coordinates from them — a normalised demand-rate called u, and the state of charge — and just read the fuel-cell power off a two-dimensional table that we computed offline. It's essentially a discretised optimisation policy, the same family as ECMS. The problem is on the right: because the table is baked offline, it can't adapt to this car's real losses, and on our profile it ends with the supercap a full six percent higher than it started. So its headline 218 isn't a fair charge-sustaining number — it's spending less fuel only because it quietly banks charge. That's exactly the failure mode Strategy G's live feedback prevents.</div>
+</section>
+
+<!-- ════════════ SLIDE 13 — WHY G COMBINES THE FIELD ════════════ -->
+<section class="slide">
+  <div class="kicker">The Field · The Other Controllers — 5/5</div>
+  <h2 class="title">Why G — the best of each</h2>
+  <div class="spectrum" data-anim="fade-up" style="margin-top:6px">
+    <div class="s1">Constant-FC<br><span style="font-weight:400;font-size:10px">open-loop</span></div>
+    <div class="s2">Rule / H<br><span style="font-weight:400;font-size:10px">+ SOC trim</span></div>
+    <div class="s3">PI-only<br><span style="font-weight:400;font-size:10px">full feedback</span></div>
+    <div class="s4">ECMS / A<br><span style="font-weight:400;font-size:10px">optimisation</span></div>
+    <div class="s5">Strategy G ★<br><span style="font-weight:400;font-size:10px">FF + FB + supervisor</span></div>
+  </div>
+  <div class="grid g2" style="gap:24px;margin-top:18px">
+    <div class="stagger">
+      <h3>What G borrows from the field</h3>
+      <table>
+        <tr><th>From</th><th>G inherits</th></tr>
+        <tr><td>Constant-FC / H</td><td><b>Feedforward anchor</b> — the LPF tracks mean demand, so the FC sits near the optimum without chasing pulses.</td></tr>
+        <tr><td>Rule / PI</td><td><b>SOC feedback</b> — the smooth P+I version of the thermostat, guaranteeing charge sustenance.</td></tr>
+        <tr><td>ECMS / A</td><td><b>Supervisory trim</b> — the per-lap offset plays the role of a co-state, but model-free.</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>…and what it drops</h3>
+      <ul class="stagger">
+        <li><b>No fixed cycle assumption</b> (unlike Constant-FC, H, A) — works on any profile.</li>
+        <li><b>No baked table or offline solve</b> (unlike A / ECMS) — pure arithmetic on 3 live signals.</li>
+        <li><b>No bang-bang chatter</b> (unlike Rule) — continuous, smooth command.</li>
+        <li><b>No feedforward-less lag</b> (unlike PI-only) — keeps the LPF anchor.</li>
+      </ul>
+      <div class="good-note">Net: G matches the best charge-sustaining mileage (~235) AND is the only one robust to imperfect, inconsistent laps — exactly our race risk.</div>
+    </div>
+  </div>
+  <div class="notes">This is the punchline of the whole comparison. Lay the field out as a spectrum from simple to complex: open-loop constant, then rule and H with a little trim, then full feedback, then the optimisation approaches. Strategy G sits at the right end, but it's not just "more complex" — it's a deliberate recombination. From constant-FC and H it takes the feedforward anchor, so the cell sits near its optimum without chasing every pulse. From the rule-based and PI controllers it takes smooth SOC feedback, which guarantees charge sustenance. And from the ECMS family it takes the idea of a slow supervisory trim — our per-lap offset acts like a co-state, but without needing a model. Then look at what it throws away: no fixed-cycle assumption, no offline table, no chatter, no feedforward-less lag. That's why G ties the best mileage and is the only one that survives imperfect laps — which is the realistic race scenario.</div>
 </section>
 
 <!-- ════════════ SLIDE 9 — SIMULINK MAPPING ════════════ -->
