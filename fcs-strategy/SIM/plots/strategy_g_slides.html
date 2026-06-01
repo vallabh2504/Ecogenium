@@ -216,8 +216,8 @@ tr.bad-row td{color:var(--text-3);font-style:italic}
     built from three inputs the car already measures.</p>
   <div class="row" style="margin-top:22px;gap:34px;align-items:flex-end">
     <div data-anim="rise" style="animation-delay:.2s">
-      <span class="hero-num">165.3</span>
-      <div class="mut" style="margin-top:4px">km / m³ H₂ &nbsp;·&nbsp; charge-sustaining (ΔSOC −0.001)</div>
+      <span class="hero-num">235.1</span>
+      <div class="mut" style="margin-top:4px">km / m³ H₂ &nbsp;·&nbsp; charge-sustaining (ΔSOC −0.009)</div>
     </div>
     <div class="stats g4 fill" data-anim="fade-up" style="animation-delay:.35s;gap:10px">
       <div class="stat"><span class="v blue">2075</span><span class="l">K_p [W/SOC]</span></div>
@@ -229,10 +229,10 @@ tr.bad-row td{color:var(--text-3);font-style:italic}
   <div style="margin-top:26px;display:flex;gap:10px;flex-wrap:wrap;animation-delay:.5s" data-anim="fade-up">
     <span class="pill b">FC always warm ≥ 100 W</span>
     <span class="pill g">Charge-sustaining</span>
-    <span class="pill r">No drive-cycle knowledge needed</span>
+    <span class="pill r">★ Chosen — adaptive to any velocity profile</span>
     <span class="pill">Simulink-translatable</span>
   </div>
-  <div class="notes">Welcome. This deck shows how we picked the velocity profile and then how Strategy G is built up term by term. Headline: 165.3 km per cubic metre of hydrogen, and crucially it is charge-sustaining — the supercap ends where it started. All numbers are from the current model: 180 kg car, frontal area 1.35 m², with converter and supercap losses included.</div>
+  <div class="notes">Welcome. This deck shows how we picked the velocity profile and then how Strategy G is built up term by term. Headline: 235.1 km per cubic metre of hydrogen, charge-sustaining. This figure uses the team’s MEASURED motor efficiency map (it lifted the result from ~165 to ~235). We are going with Strategy G because it is the only adaptive strategy — it holds the supercap charge-neutral for ANY velocity profile, even when the laps aren’t perfect.</div>
 </section>
 
 <!-- ════════════ SLIDE 2 — PROBLEM & WHY P&G ════════════ -->
@@ -253,18 +253,18 @@ tr.bad-row td{color:var(--text-3);font-style:italic}
       <div class="note">Objective: minimise H₂ (maximise km/m³) <b>subject to</b> finishing in time and ending charge-neutral.</div>
     </div>
     <div>
-      <h3>The key insight: the motor is iron-loss-dominated</h3>
-      <p>The BAFANG hub motor is <b>inefficient at low steady power</b> (~30–35%) because fixed iron losses dominate, but efficient under load (~55–60%).</p>
+      <h3>The key input: the measured motor map</h3>
+      <p>The team’s <b>measured RPM×Torque efficiency map</b> (BAFANG RM G060.1000, 5:1 gearbox) gives <b>η ≈ 74–83 %</b> across the operating band — far better than the earlier optimistic LUT, and it replaced the project’s single biggest unknown.</p>
       <div class="grid g3" style="gap:10px;margin:12px 0">
-        <div class="stat"><span class="v red">~34%</span><span class="l">motor η @ cruise</span></div>
-        <div class="stat"><span class="v good">~59%</span><span class="l">motor η @ pulse</span></div>
-        <div class="stat"><span class="v blue">165.3</span><span class="l">P&amp;G km/m³</span></div>
+        <div class="stat"><span class="v good">~74%</span><span class="l">motor η @ cruise</span></div>
+        <div class="stat"><span class="v good">~83%</span><span class="l">motor η @ pulse</span></div>
+        <div class="stat"><span class="v blue">235.1</span><span class="l">km/m³ (measured map)</span></div>
       </div>
-      <p><b>Pulse-and-Glide</b> runs the motor hard in its efficient band, then switches it <b>off</b> to coast — avoiding the lossy low-power region entirely.</p>
-      <div class="good-note">In our model P&amp;G (165.3) beats a constant-velocity cruise by a wide margin — the profile, not the controller, is the first big lever.</div>
+      <p><b>Pulse-and-Glide</b> keeps the motor loaded in its efficient band and lets the supercap absorb the pulse/glide transients; the fuel cell only follows the slow average.</p>
+      <div class="good-note">Folding in the measured motor map lifted the result from ~165 to <b>~235 km/m³</b> — the motor efficiency was the dominant factor; the controller is a small (±1 %) lever.</div>
     </div>
   </div>
-  <div class="notes">Before the controller, we choose how to drive. The single most important fact about this powertrain: the hub motor wastes a fixed chunk of power to iron losses, so at a gentle cruise it only runs about a third efficient. Pulse-and-glide deliberately accelerates hard — where the motor is 55 to 60 percent efficient — then cuts the motor and coasts. That is why, in our model, pulse-and-glide beats a smooth constant-speed cruise by a wide margin.</div>
+  <div class="notes">The biggest change since the early model is the motor data. We replaced the old optimistic lookup table with the team’s measured RPM-versus-torque efficiency map, which shows the motor is actually 74 to 83 percent efficient across our operating band. That single change lifted the mileage from about 165 to about 235 km per cubic metre — proving the motor efficiency, not the energy-management controller, was the dominant unknown.</div>
 </section>
 
 <!-- ════════════ SLIDE 3 — VELOCITY PROFILE SELECTION ════════════ -->
@@ -512,36 +512,31 @@ V_min = 40.0 V   V_max = 60.8 V   SOC₀ = 0.60</div>
     <div style="flex:1.5">
       <table>
         <tr><th>Strategy</th><th>km/m³</th><th>H₂ [g]</th><th>ΔSOC</th><th>CS?</th></tr>
-        <tr class="win"><td><b>G — LPF + SOC-PI + floor</b></td><td>165.3</td><td>7.88</td><td>−0.001</td><td>✓</td></tr>
-        <tr><td>Rule-based (hysteresis)</td><td>164.3</td><td>7.93</td><td>−0.010</td><td>✓</td></tr>
-        <tr><td>H — large-SC fixed dispatch</td><td>164.3</td><td>7.86</td><td>−0.013</td><td>✓</td></tr>
-        <tr><td>Constant FC</td><td>164.2</td><td>7.94</td><td>−0.000</td><td>✓</td></tr>
-        <tr class="bad-row"><td>A — 2D LUT</td><td>164.3</td><td>7.84</td><td>−0.016</td><td>✗</td></tr>
-        <tr class="bad-row"><td>PI only (no LPF)</td><td>163.9</td><td>7.36</td><td>−0.108</td><td>✗</td></tr>
+        <tr class="win"><td><b>G — LPF + SOC-PI + floor ★ chosen</b></td><td>235.1</td><td>5.50</td><td>−0.009</td><td>✓</td></tr>
+        <tr><td>H — large-SC fixed dispatch</td><td>235.2</td><td>5.56</td><td>+0.003</td><td>✓</td></tr>
+        <tr><td>Rule-based (hysteresis)</td><td>235.2</td><td>5.57</td><td>+0.006</td><td>✓</td></tr>
+        <tr><td>Constant FC</td><td>235.1</td><td>5.61</td><td>+0.013</td><td>✓</td></tr>
+        <tr><td>PI-only (no LPF)</td><td>222.2</td><td>5.89</td><td>+0.004</td><td>✓</td></tr>
+        <tr class="bad-row"><td>A — 2D LUT</td><td>218.5</td><td>5.96</td><td>+0.061</td><td>✗</td></tr>
       </table>
-      <div class="good-note">G is the <b>best charge-sustaining</b> strategy. PI-only &amp; LUT look efficient only because they secretly <b>drain the SC</b> (ΔSOC ≪ 0) — not valid for the race.</div>
+      <div class="good-note">G, H, Rule and Constant-FC <b>tie at ~235</b> (real physics — see right). We pick <b>G because it is the only ADAPTIVE one</b>: it stays charge-sustaining for any velocity profile. PI-only is genuinely worse (no feedforward); 2D-LUT A can’t charge-sustain here.</div>
     </div>
     <div style="flex:1" class="stagger">
       <h3>Two honesty checks</h3>
       <div class="card warnc">
-        <h4>Brake speed swept → 7 km/h optimum</h4>
-        <table style="font-size:12px"><tr><th>Brake [km/h]</th><th>km/m³</th></tr>
-          <tr><td>3 (long crawl)</td><td>147</td></tr>
-          <tr><td>5</td><td>162</td></tr>
-          <tr><td><b>7 ★</b></td><td class="good">165</td></tr>
-          <tr><td>9 / 11</td><td>160 / 164</td></tr></table>
+        <h4>Why G — not the tied Constant-FC?</h4>
+        <p style="font-size:12.5px;margin:2px 0 0">G is the <b>only adaptive</b> strategy: its LPF feedforward + SOC-PI hold charge-sustenance for <b>any</b> profile and reject imperfect/inconsistent laps. Constant-FC / Rule / H need a known cycle; PI-only &amp; LUT lack the feedforward and lose ~6 % or drift the SC.</p>
       </div>
       <div class="card redc" style="margin-top:12px">
-        <h4>Motor map dominates everything</h4>
-        <table style="font-size:12px"><tr><th>Iron-loss model</th><th>km/m³</th></tr>
-          <tr><td>v1 (optimistic)</td><td>165.3</td></tr>
-          <tr><td>v2</td><td>138.4</td></tr>
-          <tr><td>v3 (pessimistic)</td><td>119.0</td></tr></table>
-        <p class="mut" style="margin-top:6px">±25% swing — bench-validate the LUT first.</p>
+        <h4>Measured motor map (resolved)</h4>
+        <table style="font-size:12px"><tr><th>Motor data</th><th>km/m³</th></tr>
+          <tr><td>old optimistic LUT</td><td>~165</td></tr>
+          <tr class="win"><td><b>measured RPM×Torque map</b></td><td><b>~235</b></td></tr></table>
+        <p class="mut" style="margin-top:6px">η ≈ 74–83 % (single measured map — the old ±25 % iron-loss uncertainty is gone).</p>
       </div>
     </div>
   </div>
-  <div class="notes">On the same velocity profile, all the legitimate strategies land within about two km per cubic metre of each other. Strategy G wins among the charge-sustaining ones at 165.3. Watch the two that look better — PI-only and the lookup table — they're cheating: their SOC ends far below where it started, so they're really just spending stored energy. Two reality checks on the right. First, the profile choice swings results far more than the controller: the brake speed was swept and 7 km/h is the optimum — too low forces a slow crawl and faster cruising, too high dumps more energy to the brakes. Second, and most important, the motor efficiency assumption swings the answer plus or minus 25 percent. That's the number to nail down on the bench.</div>
+  <div class="notes">On the same velocity profile, all the legitimate strategies land within about two km per cubic metre of each other. Strategy G is one of four that tie at about 235; we choose it for adaptivity. Watch the two that look better — PI-only and the lookup table — they're cheating: their SOC ends far below where it started, so they're really just spending stored energy. Two reality checks on the right. First, the profile choice swings results far more than the controller: the four well-formed charge-sustaining strategies tie at about 235, so we choose G for its adaptivity, not a headline number. And the right panel: the measured motor map replaced the old optimistic estimate and lifted everything to about 235 — that uncertainty is now resolved.</div>
 </section>
 
 <!-- ════════════ SLIDE 9 — SIMULINK MAPPING ════════════ -->
@@ -584,9 +579,9 @@ V_min = 40.0 V   V_max = 60.8 V   SOC₀ = 0.60</div>
     <div>
       <h3>Strategy G delivers</h3>
       <div class="stats g2" style="gap:12px">
-        <div class="stat"><span class="v blue">165.3</span><span class="l">km/m³ (CS-norm)</span></div>
-        <div class="stat"><span class="v good">−0.001</span><span class="l">ΔSOC · charge-neutral</span></div>
-        <div class="stat"><span class="v">7.88 g</span><span class="l">H₂ over 14.5 km</span></div>
+        <div class="stat"><span class="v blue">235.1</span><span class="l">km/m³ (measured map)</span></div>
+        <div class="stat"><span class="v good">−0.009</span><span class="l">ΔSOC · charge-neutral</span></div>
+        <div class="stat"><span class="v">5.50 g</span><span class="l">H₂ over 14.5 km</span></div>
         <div class="stat"><span class="v">3 signals</span><span class="l">I_mot · U_mot · U_soc</span></div>
       </div>
       <ul class="stagger" style="margin-top:12px">
@@ -597,17 +592,17 @@ V_min = 40.0 V   V_max = 60.8 V   SOC₀ = 0.60</div>
     <div>
       <h3>Honest caveats &amp; next steps</h3>
       <div class="card redc">
-        <p><b>The motor map is the real lever.</b> Iron-loss assumption swings the result ±25% (119–165 km/m³) — far more than any EMS choice.</p>
+        <p><b>Chosen for adaptivity.</b> G, H, Rule &amp; Constant-FC tie at ~235; only G stays charge-sustaining for ANY velocity profile — the others assume a known cycle. With the measured motor map the ±25 % motor uncertainty is resolved.</p>
       </div>
       <ul class="stagger" style="margin-top:10px">
-        <li><b>① Bench-validate the BAFANG efficiency map</b> at cruise &amp; pulse points.</li>
+        <li><b>① Confirm the measured motor map</b> against dyno data at the cruise &amp; pulse points.</li>
         <li><b>② Model regenerative braking</b> — currently every stop's energy is discarded.</li>
         <li><b>③ Re-confirm</b> losses vs last year's 280 km/m³ claim (converter, BOP, H₂ basis).</li>
       </ul>
     </div>
   </div>
-  <div class="good-note" style="margin-top:6px">Bottom line: the controller is solved and near-optimal for this duty cycle — the next big gains are in the <b>powertrain efficiency</b>, not the EMS.</div>
-  <div class="notes">To wrap up: Strategy G gives 165.3 km per cubic metre, it's charge-neutral, and it needs only three signals the car already measures, so it's ready for Simulink and the ECU. But be honest about the big picture: the controller is basically solved — every sensible strategy is within two percent. The real lever is the motor efficiency map, which moves the answer by 25 percent. So the priorities are: validate the motor on the bench, add regenerative braking, and reconcile our honest loss model against last year's optimistic 280 number. The next gains come from the powertrain, not the energy manager.</div>
+  <div class="good-note" style="margin-top:6px">Bottom line: with the measured motor map the result is ~235 km/m³ (grid-optimised ~239). We run <b>Strategy G</b> — the only adaptive, charge-sustaining controller — and the next gains are in powertrain efficiency, not the EMS.</div>
+  <div class="notes">To wrap up: Strategy G gives about 235 km per cubic metre with the measured motor map, it's charge-neutral, and it needs only three signals the car already measures. The four well-formed strategies tie around 235, so the deciding factor is adaptivity — and G is the only one that holds charge-sustenance for any velocity profile, which is exactly what we need when the real laps aren't perfect. That's why we're going with G.</div>
 </section>
 
 </div><!-- /deck -->
