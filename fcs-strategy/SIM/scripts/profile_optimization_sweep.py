@@ -63,7 +63,11 @@ def _cruise_power(v, vtarget, grade, a_cap):
     # accelerate gently toward target
     a_need = min(a_cap, (vtarget - v) / max(DT, 0.2))
     F = 0.5*CD*AF*RHO*v*v + CRR*MASS*G + MASS*G*grade + MASS*a_need
-    return max(0., F*v/ETA_DT)
+    # Convert the desired tractive FORCE to a power command. P = F·v underflows to
+    # zero at standstill (so the car would never launch); floor the speed at the
+    # SAME 0.3 m/s that _net_force uses for P·η/max(v,0.3), so the commanded power
+    # reproduces F (capped at the motor's F_max) right down to v=0.
+    return max(0., F*max(v, 0.3)/ETA_DT)
 
 
 def _build_lap_cruise(v_cruise, a_accel, k_grade=0., const_power=None):
