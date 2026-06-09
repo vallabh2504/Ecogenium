@@ -101,11 +101,9 @@ _M_ETA_S   = _M_ETA[_m_idx]
 def motor_eta(p_out_W):
     """BAFANG RM G060.1000 efficiency (0–1) from shaft output power [W].
 
-    DEPRECATED (1D legacy path). This 1D shaft-power curve peaks at ~83 % and
-    DISAGREES with the 2D LUT (`motor_lookup_2d`, peak ~74 %) that the production
-    pipeline (`combined_best_profile.compute_motor_signals`) actually uses. It is
-    retained only for the legacy `build_demand_profile` / `simulate_race` path.
-    Prefer `motor_lookup_2d` for all new work.
+    DEPRECATED (1D legacy path), retained only for the legacy `build_demand_profile`
+    / `simulate_race` path. All current work uses the measured RPM×Torque map via
+    `motor_lookup_2d` / `motor_eta_rt` (and `compute_motor_signals`).
     """
     return np.interp(np.maximum(p_out_W, 0.0), _M_POUT_S, _M_ETA_S,
                      left=_M_ETA_S[0], right=_M_ETA_S[-1])
@@ -113,64 +111,61 @@ def motor_eta(p_out_W):
 
 R_WHEEL = 0.295   # m — wheel radius verified against LUT (P_out = Torque × v / R)
 
-_LUT_PATH = os.path.join(_THIS_DIR, '..', 'datasheets', 'motor_lookup_table.xlsx')
+_MOTOR_XLSX = os.path.join(_THIS_DIR, '..', 'datasheets', 'motor_eff_rpm_torque.xlsx')
 
-def _load_motor_lut():
-    df = pd.read_excel(_LUT_PATH)
-    speeds  = np.array(sorted(df['Speed_kmh'].unique()))
-    torques = np.array(sorted(df['Torque_Nm'].unique()))
-    def _interp(col):
-        mat = df.pivot(index='Torque_Nm', columns='Speed_kmh', values=col).values
-        return RegularGridInterpolator((torques, speeds), mat,
-                                       method='linear', bounds_error=False,
-                                       fill_value=None)
-    lut = {'eta': _interp('eta_v1_pct'),
-           'I_dc': _interp('I_dc_A'),
-           'V_eff': _interp('V_eff_V')}
-    # DC input-power interpolators for each iron-loss variant. The production
-    # pipeline uses v1 (lowest iron loss → highest efficiency, optimistic).
-    # v2/v3 are higher-iron-loss models, exposed for sensitivity analysis.
-    # Note: I_dc × V_eff == P_in_v1 by construction, so 'v1' reproduces the
-    # legacy I_dc·V_eff demand exactly.
-    for v in ('v1', 'v2', 'v3'):
-        col = f'P_in_{v}_W'
-        if col in df.columns:
-            lut[f'P_in_{v}'] = _interp(col)
-    return lut
+# ── Measured motor efficiency map (AUTHORITATIVE — team measured data) ───────────
+# Source: datasheets/motor_eff_rpm_torque.xlsx ('Efficiency Lookup'), the team's
+# measured RPM×Torque map (output/wheel-referenced), identical to the file the
+# production pipeline (combined_best_profile.compute_motor_signals) uses. This
+# REPLACES the old motor_lookup_table.xlsx 2D LUT (archived under
+# datasheets/archive/) everywhere — including the legacy/auxiliary scripts and the
+# result-figure overlay. η ≈ 0.17–0.83 (peak 83.4 %).
+RPM_PER_MS = 60.0 / (2 * np.pi) / R_WHEEL   # output/wheel RPM per m/s
 
-_MOTOR_LUT = _load_motor_lut()
+def _load_motor_eta():
+    df = pd.read_excel(_MOTOR_XLSX, sheet_name='Efficiency Lookup')
+    tq  = np.array([float(c) for c in df.columns[1:]])      # torque axis [Nm]
+    rp  = df.iloc[:, 0].values.astype(float)                # output RPM axis
+    eta = df.iloc[:, 1:].values.astype(float) / 100.0       # efficiency [0–1]
+    itp = RegularGridInterpolator((rp, tq), eta, method='linear',
+                                  bounds_error=False, fill_value=None)
+    return itp, (float(rp.min()), float(rp.max())), (float(tq.min()), float(tq.max()))
 
-# Default motor iron-loss variant used by the production demand pipeline.
-# 'v1' is the most optimistic (lowest iron loss). Change to 'v2'/'v3' to study
-# sensitivity to the iron-loss assumption.
-MOTOR_VARIANT = 'v1'
+_MOTOR_ETA, _RPM_RNG, _TQ_RNG = _load_motor_eta()
+MOTOR_V = 48.0               # motor is always fed 48 V (I_mot = P_dem / 48)
+MOTOR_VARIANT = 'measured'   # single measured map — no iron-loss variants
+
+def motor_eta_rt(rpm, torque):
+    """Motor system efficiency η(0–1) at output RPM & output torque (clipped to map)."""
+    rp = np.clip(np.atleast_1d(np.asarray(rpm, float)),    _RPM_RNG[0], _RPM_RNG[1])
+    tq = np.clip(np.atleast_1d(np.asarray(torque, float)), _TQ_RNG[0],  _TQ_RNG[1])
+    return _MOTOR_ETA(np.column_stack([rp, tq]))
 
 def motor_power_2d(speed_kmh, torque_nm, variant=None):
-    """DC input power [W] from the 2D LUT for a given iron-loss variant.
-
-    variant ∈ {'v1','v2','v3'}; defaults to MOTOR_VARIANT ('v1').
-    Returns 0 for coast/stop points (zero torque or zero speed).
-    """
-    variant = variant or MOTOR_VARIANT
+    """Motor ELECTRICAL input power [W] from the measured map.
+    `variant` kept for back-compat but ignored (single measured map).
+    Returns 0 for coast/stop points (zero torque or zero speed)."""
     spd = np.atleast_1d(np.asarray(speed_kmh, float))
     trq = np.atleast_1d(np.asarray(torque_nm, float))
     moving = (trq > 0.05) & (spd > 0.5)
-    pts = np.column_stack([np.clip(trq, 1., 35.), np.clip(spd, 5., 40.)])
-    key = f'P_in_{variant}'
-    if key not in _MOTOR_LUT:
-        raise KeyError(f"motor variant '{variant}' not in LUT")
-    return np.where(moving, _MOTOR_LUT[key](pts), 0.)
+    v   = spd / 3.6
+    eta = np.clip(motor_eta_rt(v * RPM_PER_MS, trq), 0.05, 0.999)
+    P_mech = trq * (np.maximum(v, 0.3) / R_WHEEL)           # T·ω at the wheel [W]
+    return np.where(moving, P_mech / eta, 0.)
 
 def motor_lookup_2d(speed_kmh, torque_nm):
-    """2D BAFANG LUT: (Speed_kmh, Torque_Nm) → (I_dc_A, V_eff_V, eta).
-    Returns zeros for zero-torque / zero-speed points (coast, stop)."""
+    """(Speed_kmh, Torque_Nm) → (I_dc_A, V_eff_V, eta) on the MEASURED map.
+    V_eff = 48 V (motor bus); I_dc = P_elec/48 where P_elec = P_mech/η = P_wheel/η —
+    identical to combined_best_profile.compute_motor_signals. Zeros for coast/stop."""
     spd = np.atleast_1d(np.asarray(speed_kmh, float))
     trq = np.atleast_1d(np.asarray(torque_nm, float))
     moving = (trq > 0.05) & (spd > 0.5)
-    pts = np.column_stack([np.clip(trq, 1., 35.), np.clip(spd, 5., 40.)])
-    I   = np.where(moving, _MOTOR_LUT['I_dc'](pts),       0.)
-    V   = np.where(moving, _MOTOR_LUT['V_eff'](pts),      0.)
-    eta = np.where(moving, _MOTOR_LUT['eta'](pts) / 100., 0.)
+    v   = spd / 3.6
+    eta = np.where(moving, np.clip(motor_eta_rt(v * RPM_PER_MS, trq), 0.05, 0.999), 0.)
+    P_mech = trq * (np.maximum(v, 0.3) / R_WHEEL)
+    P_elec = np.where(moving, P_mech / np.where(eta > 0, eta, 1.), 0.)
+    I = P_elec / MOTOR_V
+    V = np.where(moving, MOTOR_V, 0.)
     return I, V, eta
 
 

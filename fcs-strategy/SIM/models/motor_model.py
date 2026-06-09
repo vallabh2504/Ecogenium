@@ -1,11 +1,11 @@
 """
-Motor Model — BAFANG RM G060.1000 hub motor, 2D lookup table.
+Motor Model — BAFANG RM G060.1000 hub motor, measured RPM×Torque efficiency map.
 
-Data source: ../datasheets/motor_lookup_table.xlsx
-  Grid: 36 speed points (5–40 km/h) × 35 torque points (1–35 Nm)
-  Outputs: I_dc_A, V_eff_V, eta_v1_pct
+Data source: ../datasheets/motor_eff_rpm_torque.xlsx ('Efficiency Lookup')
+  The team's AUTHORITATIVE measured map (output/wheel-referenced), replacing the
+  archived motor_lookup_table.xlsx. η ≈ 0.17–0.83 (peak 83.4 %).
 
-Public API
+Public API (interface preserved for back-compat)
 ──────────
   motor_lookup_2d(speed_kmh, torque_nm) → (I_dc_A, V_eff_V, eta)
   motor_eta(p_out_W)                    → η  (0–1)  [1D fallback]
@@ -18,42 +18,44 @@ import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_LUT_PATH = os.path.join(_THIS_DIR, '..', 'datasheets', 'motor_lookup_table.xlsx')
+_MOTOR_XLSX = os.path.join(_THIS_DIR, '..', 'datasheets', 'motor_eff_rpm_torque.xlsx')
 
 # ── Wheel geometry ─────────────────────────────────────────────────────────────
-R_WHEEL = 0.295   # m — verified: P_out = Torque × v / R at every LUT row
+R_WHEEL = 0.295   # m — verified: P_out = Torque × v / R
+MOTOR_V = 48.0    # motor is always fed 48 V (I_dc = P_elec / 48)
+RPM_PER_MS = 60.0 / (2 * np.pi) / R_WHEEL
 
-# ── 2D LUT loader ──────────────────────────────────────────────────────────────
-def _load_motor_lut():
-    df = pd.read_excel(_LUT_PATH)
-    speeds  = np.array(sorted(df['Speed_kmh'].unique()))   # 5–40 km/h, 36 values
-    torques = np.array(sorted(df['Torque_Nm'].unique()))   # 1–35 Nm,   35 values
-    def _interp(col):
-        mat = df.pivot(index='Torque_Nm', columns='Speed_kmh', values=col).values
-        return RegularGridInterpolator((torques, speeds), mat,
-                                       method='linear', bounds_error=False,
-                                       fill_value=None)
-    return {'eta':  _interp('eta_v1_pct'),
-            'I_dc': _interp('I_dc_A'),
-            'V_eff': _interp('V_eff_V')}
+# ── Measured efficiency map loader ─────────────────────────────────────────────
+def _load_motor_eta():
+    df = pd.read_excel(_MOTOR_XLSX, sheet_name='Efficiency Lookup')
+    tq  = np.array([float(c) for c in df.columns[1:]])
+    rp  = df.iloc[:, 0].values.astype(float)
+    eta = df.iloc[:, 1:].values.astype(float) / 100.0
+    itp = RegularGridInterpolator((rp, tq), eta, method='linear',
+                                  bounds_error=False, fill_value=None)
+    return itp, (float(rp.min()), float(rp.max())), (float(tq.min()), float(tq.max()))
 
-_MOTOR_LUT = _load_motor_lut()
+_MOTOR_ETA, _RPM_RNG, _TQ_RNG = _load_motor_eta()
 
 
 def motor_lookup_2d(speed_kmh, torque_nm):
     """
-    2D BAFANG LUT: (Speed_kmh, Torque_Nm) → (I_dc_A, V_eff_V, eta).
+    (Speed_kmh, Torque_Nm) → (I_dc_A, V_eff_V, eta) on the MEASURED map.
 
-    Returns zeros for zero-torque / zero-speed points (coast, stop).
-    Inputs may be scalars or arrays — always returns arrays.
+    V_eff = 48 V; I_dc = P_elec/48 where P_elec = P_mech/η = P_wheel/η. Zeros for
+    coast/stop points. Inputs may be scalars or arrays — always returns arrays.
     """
     spd = np.atleast_1d(np.asarray(speed_kmh, float))
     trq = np.atleast_1d(np.asarray(torque_nm, float))
     moving = (trq > 0.05) & (spd > 0.5)
-    pts = np.column_stack([np.clip(trq, 1., 35.), np.clip(spd, 5., 40.)])
-    I   = np.where(moving, _MOTOR_LUT['I_dc'](pts),       0.)
-    V   = np.where(moving, _MOTOR_LUT['V_eff'](pts),      0.)
-    eta = np.where(moving, _MOTOR_LUT['eta'](pts) / 100., 0.)
+    v   = spd / 3.6
+    rp  = np.clip(v * RPM_PER_MS, _RPM_RNG[0], _RPM_RNG[1])
+    tq  = np.clip(trq,            _TQ_RNG[0],  _TQ_RNG[1])
+    eta = np.where(moving, np.clip(_MOTOR_ETA(np.column_stack([rp, tq])), 0.05, 0.999), 0.)
+    P_mech = trq * (np.maximum(v, 0.3) / R_WHEEL)
+    P_elec = np.where(moving, P_mech / np.where(eta > 0, eta, 1.), 0.)
+    I = P_elec / MOTOR_V
+    V = np.where(moving, MOTOR_V, 0.)
     return I, V, eta
 
 

@@ -9,7 +9,7 @@
 > 1. **FC identity fixed** — the stack is a **balticFuelCells LC 52.30** (52 cells × 30 cm², ~1040 W gross), *not* a "Horizon 52 W" unit (confirmed against `FC_Manual.pdf`).
 > 2. **FC→bus DC-DC converter loss** added (`ETA_DCDC = 0.95`); `P_fc` is FC net output, bus receives `P_fc × 0.95`.
 > 3. **Charge-sustaining normalisation** — strategies are ranked on dSOC=0-normalised H₂ (`km_per_m3()` / `m_H2_norm`), removing tolerance-band artefacts.
-> 4. **Motor iron-loss variant** is `v1` (optimistic); the main sim prints a v1/v2/v3 km/m³ sensitivity band (currently 165/138/119).
+> 4. **Motor model = the team's MEASURED RPM×Torque map** (`motor_eff_rpm_torque.xlsx`, η ≈ 0.17–0.83). This is now the single authoritative motor input across **all** code paths; the old `motor_lookup_table.xlsx` 2D LUT and its v1/v2/v3 iron-loss variants are **archived** (`datasheets/archive/`) and no longer used.
 > 5. **SC efficiency** `SC_ETA=0.97` is now applied as √0.97 per direction (true 3 % round-trip).
 > 6. Vehicle constants in this README corrected to match the code; 1D `motor_eta` deprecated.
 >
@@ -88,8 +88,9 @@ SIM/
 ├── run_test.py                        ← isolation test: confirms folder is self-contained ★
 │
 ├── datasheets/                        ← physical hardware reference documents
-│   ├── motor_lookup_table.xlsx        ← BAFANG 2D efficiency map (PRIMARY INPUT)
-│   ├── sem_2025_eu.csv                ← SEM 2025 EU race route elevation profile
+│   ├── motor_eff_rpm_torque.xlsx      ← BAFANG MEASURED RPM×Torque η map (PRIMARY INPUT) ★
+│   ├── archive/motor_lookup_table.xlsx ← old 2D LUT (ARCHIVED — no longer used)
+│   ├── sem_2025_eu.csv                ← SEM 2025 EU race route: distance, elevation, UTM x/y, lat/lon
 │   ├── HyCaps.pdf                     ← VINATech VEL13353R8257G LIC datasheet
 │   ├── Hycaps.txt                     ← Team notes on HyCap configuration
 │   ├── BAFANG_RM_G060.1000_motor_datasheet.pdf
@@ -137,8 +138,9 @@ SIM/
 
 | File | Description |
 |------|-------------|
-| `motor_lookup_table.xlsx` | **Primary motor input.** BAFANG RM G060.1000 hub motor, 2D grid: 36 speed points (5–40 km/h) × 35 torque points (1–35 Nm). Columns: `Speed_kmh`, `Torque_Nm`, `I_dc_A`, `V_eff_V`, `eta_v1_pct`. Used by `motor_lookup_2d()` in `ems_core.py`. |
-| `sem_2025_eu.csv` | SEM 2025 European event GPS route. Columns: distance [m], elevation [m]. Used by `_load_route()` to compute per-step grade for every lap. Lap distance D_LAP = 1318 m (14.5 km / 11 laps). |
+| `motor_eff_rpm_torque.xlsx` | **Primary motor input (team MEASURED map).** Sheet `Efficiency Lookup`: output/wheel-referenced RPM × Torque → η (35 RPM × 152 torque, η 0.17–0.83). Used everywhere via `motor_eta_rt()` / `compute_motor_signals()` and the back-compat `motor_lookup_2d()`. `P_dem = P_wheel/η`, `I_mot = P_dem/48 V`. |
+| `archive/motor_lookup_table.xlsx` | **ARCHIVED — no longer used.** The old BAFANG 2D LUT (`Speed_kmh`,`Torque_Nm`,`I_dc_A`,`V_eff_V`,`eta_v1_pct`, with v1/v2/v3 iron-loss variants). Kept for reference only; nothing in the code loads it. |
+| `sem_2025_eu.csv` | SEM 2025 European event surveyed route — the **authoritative track source**. Columns: distance [m], elevation [m], UTMX, UTMY, LongX, LatY. `_load_route()` uses distance+elevation (per-step grade); `corner_aware_sweep.py` uses the UTM x/y for corner radii. Lap D_LAP = 1319.627 m (14.5 km / 11 laps). |
 | `HyCaps.pdf` | VINATech VEL13353R8257G Lithium-Ion Capacitor (LIC) datasheet. Key specs: 3,800 F rated, 3.8 V max, **2.5 V minimum** (hard limit — below this damages the cell), DC ESR = 100 mΩ/cell. |
 | `Hycaps.txt` | Internal team notes. Confirms 2026 configuration: **20P × 16S**. Notes from 2023/24 season (16S × 10P). Power test data: 59.7 V → 40 V @ 1 A → 14 Wh. |
 | `BAFANG_RM_G060.1000_motor_datasheet.pdf` | Motor manufacturer datasheet. Peak torque, rated current, winding specs. |
@@ -157,10 +159,10 @@ SIM/
 
 | File | Description |
 |------|-------------|
-| `motor_model.py` | **Standalone 2D motor LUT.** Loads `datasheets/motor_lookup_table.xlsx` and exposes `motor_lookup_2d(speed_kmh, torque_nm) → (I_dc_A, V_eff_V, eta)`, `motor_eta(p_out_W)` (1D fallback), and `R_WHEEL = 0.295 m`. Import directly without needing `ems_core`. |
+| `motor_model.py` | **Standalone motor model (measured map).** Loads `datasheets/motor_eff_rpm_torque.xlsx` and exposes `motor_lookup_2d(speed_kmh, torque_nm) → (I_dc_A, V_eff_V, eta)` (interface preserved; V_eff=48 V, I_dc=P_elec/48), `motor_eta(p_out_W)` (1D legacy fallback), and `R_WHEEL = 0.295 m`. Import directly without needing `ems_core`. |
 | `supercap_model.py` | **Standalone SC bank model.** Exports all SC constants (`SC_C`, `SC_V_MAX`, `SC_V_MIN`, `SC_ESR`, `SC_E_J`, `SC_SOC_0`, `SC_SOC_MIN`, `SC_SOC_MAX`) and three functions: `sc_voltage(soc)`, `sc_terminal_voltage(soc, I_A)`, `sc_soc_update(soc, P_W, dt)`. Import directly without needing `ems_core`. |
 | `FuelCellEstimate_v3.py` | Electrochemical model of the **balticFuelCells LC 52.30** (Chamberlin–Kim polarisation, 52 cells, 30 cm², calibrated to the 1040 W gross nameplate). Outputs stack voltage/power, BOP, and `fc_h2_rate(I)`. The inverted P_net→I curve is hardcoded into `ems_core.py` as the `_P_TAB` / `_I_TAB` arrays. Verified: P_gross@37.5A=1044 W, V@40A=27.1 V, 19.0 SLPM, peak η_sys 59 % @ 120 W. |
-| `motor_model.py` (note) | Uses the **`v1` iron-loss variant** of the LUT (lowest iron loss → most optimistic efficiency, peak ~74 %). `v2`/`v3` are higher-loss models; the main sim reports a v1/v2/v3 km/m³ sensitivity band. The 1D `motor_eta()` (peak ~83 %) is **deprecated/legacy** and disagrees with the 2D LUT — do not use it for new work. |
+| `motor_model.py` (note) | Now backed by the **measured RPM×Torque map** (η 0.17–0.83), identical to `compute_motor_signals` — there are no longer any iron-loss v1/v2/v3 variants. The 1D `motor_eta()` is **deprecated/legacy** only. |
 
 ### strategies/
 
@@ -205,7 +207,7 @@ SIM/
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                     PHYSICAL HARDWARE INPUTS                         ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║  datasheets/motor_lookup_table.xlsx      datasheets/sem_2025_eu.csv  ║
+║  datasheets/motor_eff_rpm_torque.xlsx    datasheets/sem_2025_eu.csv  ║
 ║  BAFANG RM G060.1000                     SEM 2025 EU route           ║
 ║  36×35 grid: Speed × Torque              GPS elevation every 5 m     ║
 ║  → I_dc_A, V_eff_V, eta_v1_pct          → elev(s), grade(s)         ║
