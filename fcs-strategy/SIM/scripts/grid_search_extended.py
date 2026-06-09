@@ -30,11 +30,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# ── Extended grid search parameters ───────────────────────────────────────────
-VH_VALS = [7.0, 7.5, 8.0, 8.5, 9.0, 9.5]
-VL_VALS = [5.5, 6.0, 6.5, 7.0, 7.5, 8.0]
-PP_VALS = [400., 500., 600., 700.]
-V_DH    = 9.0   # downhill speed cap — keep fixed
+# ── Extended grid search parameters (measured-map optimum lives here) ──────────
+VH_VALS = [9.0, 9.5, 10.0, 10.5, 11.0]
+VL_VALS = [6.0, 6.5, 7.0, 7.5]
+PP_VALS = [1000., 1200., 1400., 1600.]
+V_DH    = 10.5   # downhill speed cap — keep fixed
 
 print("=== Extended P&G Grid Search — Strategy G ===")
 print(f"VH: {VH_VALS}")
@@ -139,9 +139,9 @@ sep = "-" * len(hdr)
 print(hdr)
 print(sep)
 
-CURRENT_BEST_KM3 = 206.8
+CURRENT_BEST_KM3 = 238.3   # measured-map P&G best (VH9.5/VL7.0/PP1200)
 for rank, r in enumerate(cs_results[:15], 1):
-    marker = " <-- CURRENT" if (abs(r['VH']-9.0)<0.01 and abs(r['VL']-7.0)<0.01 and abs(r['PP']-600.)<1.) else ""
+    marker = " <-- DECK" if (abs(r['VH']-10.0)<0.01 and abs(r['VL']-6.0)<0.01 and abs(r['PP']-1400.)<1.) else ""
     print(f"  {rank:2d} | {r['VH']:4.1f} | {r['VL']:4.1f} | {r['PP']:5.0f} | "
           f"{r['km3']:6.1f} | {r['H2']:6.3f} | {r['dSOC']:+7.4f} | "
           f"{r['Kp']:6.0f} | {r['dur']:8.1f} | {r['avg_v']:.2f}m/s{marker}")

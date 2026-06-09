@@ -594,19 +594,23 @@ from ~165 to ~239 km/m³.
 
 ### P&G Grid Search Best (Strategy G, charge-sustaining)
 
-> Normalised km/m³ for the high-drag vehicle (MASS=180, AF=1.35). VH<9.0 m/s
-> overruns the 35.5-min cap. Re-run `grid_search_extended.py` for the full
-> refreshed heatmap.
+> Refreshed on the **measured motor map** (`grid_search_extended.py`, 80 combos,
+> each auto-tuned to charge-sustaining). Mileage rises as cruise speed falls (less
+> aero), so the optimum sits at the **low-V_HI / 35-min feasibility edge**. Figure:
+> `plots/grid_search_extended.png`.
 
-| Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ (normalised) |
-|------|----------|----------|--------|-------|
-| 1 | 9.5 | **7.0** | 1200 | **238.9** |
-| 2 | 9.5 | 6.0 | 1200 | 237.8 |
-| 3 | 10.0 | 6.0 | 1400 | 237.5 |
-| ~ | 9.5–10.0 | 6.0–7.0 | 1200 | ~236–238 (cluster); VH 9.5 / VL 7.0 is the sweet spot |
+| Rank | VH [m/s] | VL [m/s] | PP [W] | km/m³ | dur [min] | Note |
+|------|----------|----------|--------|-------|-----------|------|
+| 1 | **9.0** | **7.0** | 1600 | **245.5** | 35.3 | grid-best — but **at the time edge** (>35.0) |
+| 2 | 9.0 | 6.5 | 1600 | 243.9 | 35.5 | also at the edge |
+| 4 | 9.5 | 7.0 | 1200 | 238.8 | 34.8 | **time-safe pick** (comfortably <35 min) |
+| 10 | 10.0 | 6.0 | 1400 | 237.2 | 34.6 | the deck profile |
 
-Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
-14.5 km in time including coast-to-stop phases).
+> **Time-margin trade-off:** the lower V_HI=9.0 profiles win on mileage (≈+7 km/m³)
+> but finish at 35.3–35.5 min — over a strict 35.0-min target. For a safe margin use
+> **V_HI 9.5 / V_LO 7.0 / PP 1200 → 238.8 km/m³ at 34.8 min**. Going below V_HI 9.0
+> overruns the time cap entirely. (This supersedes the earlier "VH 9.5 is best"
+> note — V_HI 9.0 is feasible and better if the 35-min limit has any slack.)
 
 ### Profile Benchmark (Strategy G identical)
 
