@@ -614,6 +614,25 @@ Note: Profiles with VH < 8.75 m/s fail the 35-min constraint (can't complete
 | Python P&G | ~206.8 | 6.30 | 51.6% | Valid, charge-sustaining |
 | Canonical 2023/24 telemetry | 88.8 | 14.7 | 48.6% | Raw noise → unusable directly |
 
+### Corner-aware analysis (true track geometry — `corner_aware_sweep.py`)
+
+The 1-D sim reads Distance + Elevation from `datasheets/sem_2025_eu.csv` but ignores
+corners. Folding in **corner speed limits** from the surveyed UTM (x,y) geometry
+(`v_corner = √(a_lat·R)`; tightest radius ≈ 20 m) **changes which profile wins**,
+because with no regen every forced corner-braking event dumps KE:
+
+| Profile (best of family) | cornerless | 0.3 g | 0.4 g | 0.5 g |
+|--------------------------|-----------|-------|-------|-------|
+| **P&G** VH9.5/VL7.0/PP1200 | **238.3** | 218.0 | 230.9 | **236.6** |
+| **Steady cruise** ~30 km/h | 234.3 | **229.3** | **233.7** | 233.7 |
+
+> **Grip-dependent verdict.** Pulse-and-glide peaks at 35–40 km/h, so corners
+> (capped 28–36 km/h) force repeated braking → it loses up to −8.5 % at low grip.
+> A steady ~30 km/h cruise already runs under most corner caps, so it is barely
+> affected (−0.3 %). **Crossover ≈ 0.45 g:** below it steady cruise wins, above it
+> P&G wins. The decision hinges on Hydraix I's real sustained-corner grip — measure
+> it. Figure: `plots/corner_aware_profile.png` (track map + caps + winning profile).
+
 ---
 
 ## 8. Result Plots Guide
